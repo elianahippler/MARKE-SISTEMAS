@@ -35,14 +35,31 @@ const { version } = JSON.parse(fs.readFileSync(path.join(RAIZ_PLUGIN, "package.j
 const PASTA_RELEASES = path.join(RAIZ_PLUGIN, "releases");
 const SAIDA_VERSIONADA = path.join(PASTA_RELEASES, `plugin-tomticket-${version}.tar.gz`);
 
-/** Não entram no pacote: são gerados no build ou específicos da máquina. */
-const IGNORAR = new Set(["node_modules", "dist", "data", ".git", "build-context.tar.gz"]);
+/**
+ * Não entram no pacote: são gerados no build, específicos da máquina, ou —
+ * caso de `releases` — o PRÓPRIO destino deste script. Sem excluir
+ * `releases`, cada pacote novo embutiria os `.tar.gz` de todas as versões
+ * anteriores (a pasta mora dentro da raiz que este script copia inteira) —
+ * bug real, pego ao ver o pacote da 0.1.3 carregando o da 0.1.2 dentro.
+ */
+const IGNORAR = new Set([
+  "node_modules",
+  "dist",
+  "data",
+  ".git",
+  "build-context.tar.gz",
+  "releases"
+]);
+
+/** Arquivos que não são código nem doc — backups pontuais, não geram valor no pacote. */
+const IGNORAR_ARQUIVO = /^backup-.*\.json$/;
 
 function copiar(origem: string, destino: string, ignorarTambem: string[] = []): void {
   const ignorar = new Set([...IGNORAR, ...ignorarTambem]);
   fs.mkdirSync(destino, { recursive: true });
   for (const item of fs.readdirSync(origem, { withFileTypes: true })) {
     if (ignorar.has(item.name)) continue;
+    if (!item.isDirectory() && IGNORAR_ARQUIVO.test(item.name)) continue;
     const de = path.join(origem, item.name);
     const para = path.join(destino, item.name);
     if (item.isDirectory()) copiar(de, para, ignorarTambem);

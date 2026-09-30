@@ -6,6 +6,27 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.1.3 — atendentes e departamentos viram texto + referência (30/09/2026)
+
+O `select` dependente de `endpoint` (usado em "Atendente no TomTicket" e
+"Departamento no TomTicket") só busca uma vez, no mount da aba — mesma raiz do
+problema já corrigido no `/testar`, mas esta parte não dava pra resolver só com
+persistência: mesmo com o token salvo, quem abre a aba Atendentes ANTES de
+revisitar a aba Conexão ainda vê o campo vazio, porque o componente já montou
+e já buscou (vazio) antes.
+
+Em vez de insistir no seletor, os dois campos viraram **texto livre**, e cada
+aba (Atendentes, Filas) ganhou um **bloco de referência** no topo — lista
+"nome → ID" do TomTicket, com botão de recarregar e de copiar o ID, desenhado
+pelo plugin (`src/ui/telaDeReferencia.ts`). Esse bloco tem seu próprio fetch, e
+o botão de recarregar destrava sem precisar fechar o modal.
+
+Corrigido de quebra: `scripts/empacotar.mts` estava incluindo a própria pasta
+`releases/` (com os `.tar.gz` de versões anteriores) dentro de cada pacote
+novo — cada versão ia carregando todas as anteriores, crescendo sem parar
+(pego ao ver o pacote da 0.1.3 com 0.78 MB, o dobro do esperado). Também parou
+de incluir o backup pontual de workflow do n8n.
+
 ## 0.1.2 — correções (30/09/2026)
 
 Feedback de uso real na tela de configuração, em produção:

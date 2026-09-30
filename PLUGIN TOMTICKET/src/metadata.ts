@@ -1,6 +1,7 @@
 import { definePlugin, defineStoreListing, HOOK_EVENTS } from "@markedesk/plugin-sdk";
 import { PLUGIN_ID, PLUGIN_NOME } from "@/identidade";
 import { TELA_DE_CATEGORIAS } from "@/ui/telaDeCategorias";
+import { REFERENCIA_ATENDENTES, REFERENCIA_DEPARTAMENTOS } from "@/ui/telaDeReferencia";
 
 /**
  * O que este plugin oferece.
@@ -17,7 +18,7 @@ export const metadata = definePlugin({
   displayName: PLUGIN_NOME,
   color: "#0B7FD4",
   icon: "Forum",
-  version: "0.1.2",
+  version: "0.1.3",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 
@@ -100,11 +101,28 @@ export const metadata = definePlugin({
       },
 
       /**
+       * Referência dos atendentes do TomTicket — só leitura, com botão de
+       * recarregar e copiar. Existe porque o `select` abaixo (dependente de
+       * `endpoint`) só busca uma vez, no mount da aba; se ela foi aberta antes
+       * do token salvo, fica vazio até fechar/reabrir o modal inteiro
+       * (limitação do host, não do plugin). Este bloco tem seu próprio botão
+       * de recarregar, então destrava sem precisar fechar nada.
+       */
+      {
+        name: "referenciaAtendentes",
+        type: "jsx",
+        tab: "atendentes",
+        content: REFERENCIA_ATENDENTES
+      } as any,
+
+      /**
        * De-para dos atendentes.
        *
-       * Os dois lados são seletores, e não campos de texto, porque os ids do
-       * TomTicket são hashes de 32 caracteres: digitar à mão erra, e o erro só
-       * aparece quando a ação falha no meio de um atendimento.
+       * `operadorId` é texto, não seletor: os ids do TomTicket são hashes de
+       * 32 caracteres, então em tese um seletor evitaria erro de digitação —
+       * mas na prática o seletor fica vazio sempre que a aba é aberta antes do
+       * token salvo (ver nota no bloco de referência acima), o que é pior que
+       * digitar errado. O bloco de referência logo acima dá o ID para copiar.
        */
       {
         name: "atendentes",
@@ -123,21 +141,33 @@ export const metadata = definePlugin({
           },
           {
             name: "operadorId",
-            label: "Atendente no TomTicket",
-            type: "select",
-            endpoint: "/opcoes/atendentes",
+            label: "ID do atendente no TomTicket",
+            type: "text",
             required: true,
-            helpText: "Lista carregada da sua conta do TomTicket."
+            helpText: "Cole o ID da lista acima (não é o nome)."
           }
         ]
       },
 
       /**
+       * Referência dos departamentos do TomTicket — mesma razão do bloco de
+       * atendentes acima.
+       */
+      {
+        name: "referenciaDepartamentos",
+        type: "jsx",
+        tab: "filas",
+        content: REFERENCIA_DEPARTAMENTOS
+      } as any,
+
+      /**
        * De-para das filas.
        *
-       * Só até o setor: a categoria é escolhida por setor na aba Categorias,
-       * não por fila. Duas filas que caem no mesmo setor abrem chamado na mesma
-       * categoria, que é como o TomTicket organiza o assunto.
+       * Só até o departamento: a categoria é escolhida por departamento na aba
+       * Categorias, não por fila. Duas filas que caem no mesmo departamento
+       * abrem chamado na mesma categoria, que é como o TomTicket organiza o
+       * assunto. `departamentoId` é texto pelo mesmo motivo do `operadorId`
+       * acima — ver o bloco de referência logo acima.
        */
       {
         name: "filas",
@@ -156,10 +186,10 @@ export const metadata = definePlugin({
           },
           {
             name: "departamentoId",
-            label: "Departamento no TomTicket",
-            type: "select",
-            endpoint: "/opcoes/departamentos",
-            required: true
+            label: "ID do departamento no TomTicket",
+            type: "text",
+            required: true,
+            helpText: "Cole o ID da lista acima (não é o nome)."
           }
         ]
       },

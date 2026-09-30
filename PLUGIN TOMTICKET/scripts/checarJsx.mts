@@ -7,8 +7,13 @@
  */
 import Babel from "@babel/standalone";
 import { TELA_DE_CATEGORIAS } from "../src/ui/telaDeCategorias.ts";
+import { REFERENCIA_ATENDENTES, REFERENCIA_DEPARTAMENTOS } from "../src/ui/telaDeReferencia.ts";
 
-const TELAS: Array<[string, string]> = [["telaDeCategorias", TELA_DE_CATEGORIAS]];
+const TELAS: Array<[string, string]> = [
+  ["telaDeCategorias", TELA_DE_CATEGORIAS],
+  ["referenciaAtendentes", REFERENCIA_ATENDENTES],
+  ["referenciaDepartamentos", REFERENCIA_DEPARTAMENTOS]
+];
 
 let falhou = false;
 
