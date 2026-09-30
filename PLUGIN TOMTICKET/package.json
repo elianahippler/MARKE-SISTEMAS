@@ -1,0 +1,25 @@
+{
+  "name": "@markedesk/plugin-tomticket",
+  "version": "0.1.2",
+  "description": "Plugin TomTicket — integração com o help desk TomTicket",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "start": "tsx src/index.ts",
+    "dev": "tsx watch src/index.ts",
+    "typecheck": "tsc --noEmit",
+    "check:jsx": "tsx scripts/checarJsx.mts",
+    "empacotar": "tsx scripts/empacotar.mts"
+  },
+  "dependencies": {
+    "@markedesk/plugin-sdk": "file:C:/markedesk-ng-main/markedesk-ng-main/packages/plugin-sdk",
+    "express": "^4.21.2",
+    "tsx": "^4.19.2"
+  },
+  "devDependencies": {
+    "@babel/standalone": "^7.29.9",
+    "@types/express": "^4.17.21",
+    "@types/node": "^20.11.0",
+    "typescript": "^5.9.3"
+  }
+}

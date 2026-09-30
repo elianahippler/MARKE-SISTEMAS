@@ -1,0 +1,91 @@
+{
+  "name": "Comunica - banco do plugin TomTicket",
+  "settings": { "executionOrder": "v1" },
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "comunica/grava",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [0, 0],
+      "id": "aa000000-0000-4000-8000-000000000001",
+      "name": "Grava vinculo",
+      "webhookId": "aa000000-0000-4000-8000-000000000001"
+    },
+    {
+      "parameters": {
+        "operation": "insert",
+        "schema": { "__rl": true, "value": "public", "mode": "list" },
+        "table": { "__rl": true, "value": "comunica", "mode": "list" },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "markedesk": "={{ $json.body.markedesk }}",
+            "tomticket": "={{ $json.body.tomticket }}",
+            "ID": "={{ $json.body.protocolo }}",
+            "email": "={{ $json.body.email }}",
+            "tipo": "={{ $json.body.tipo }}",
+            "departamento": "={{ $json.body.departamento }}",
+            "catogoria": "={{ $json.body.categoria }}",
+            "mensagem": "={{ $json.body.mensagem }}",
+            "quem": "={{ $json.body.quem }}"
+          },
+          "matchingColumns": [],
+          "schema": []
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [220, 0],
+      "id": "aa000000-0000-4000-8000-000000000002",
+      "name": "Insere em comunica",
+      "credentials": {
+        "postgres": { "id": "NUPgH0v8Y0KSLqNJ", "name": "Tomticket-markedesk" }
+      }
+    },
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "comunica/consulta",
+        "responseMode": "lastNode",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1.1,
+      "position": [0, 200],
+      "id": "aa000000-0000-4000-8000-000000000003",
+      "name": "Consulta vinculo",
+      "webhookId": "aa000000-0000-4000-8000-000000000003"
+    },
+    {
+      "parameters": {
+        "operation": "executeQuery",
+        "query": "SELECT markedesk, tomticket, \"ID\" AS protocolo, departamento, catogoria, email\nFROM comunica\nWHERE markedesk = $1\nORDER BY \"ID\" DESC NULLS LAST;",
+        "options": {
+          "queryReplacement": "={{ $json.body.markedesk }}"
+        }
+      },
+      "type": "n8n-nodes-base.postgres",
+      "typeVersion": 2.3,
+      "position": [220, 200],
+      "id": "aa000000-0000-4000-8000-000000000004",
+      "name": "Consulta em comunica",
+      "credentials": {
+        "postgres": { "id": "NUPgH0v8Y0KSLqNJ", "name": "Tomticket-markedesk" }
+      }
+    }
+  ],
+  "connections": {
+    "Grava vinculo": {
+      "main": [[{ "node": "Insere em comunica", "type": "main", "index": 0 }]]
+    },
+    "Consulta vinculo": {
+      "main": [[{ "node": "Consulta em comunica", "type": "main", "index": 0 }]]
+    }
+  }
+}

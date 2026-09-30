@@ -1,0 +1,11 @@
+node_modules/
+data/
+dist/
+*.log
+build-context.tar.gz
+releases/
+
+# Backup pontual do workflow de produção do n8n antes de editar (30/09/2026) —
+# artefato de uma operação, não código-fonte. O template reutilizável
+# (comunica-gateway.json) continua rastreado.
+n8n/backup-*.json
