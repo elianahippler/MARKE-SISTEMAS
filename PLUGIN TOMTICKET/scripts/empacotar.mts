@@ -102,11 +102,17 @@ try {
     path.join(temp, "Dockerfile")
   );
 
-  fs.mkdirSync(PASTA_RELEASES, { recursive: true });
-  execFileSync("tar", ["-czf", SAIDA_VERSIONADA, "Dockerfile", "packages", "plugins"], {
+  // O tar grava com nome RELATIVO, dentro do temp, e a cópia para `releases/`
+  // é do Node: o tar do Git Bash lê "D:\..." como "host:caminho" e falha
+  // ("Cannot connect to D: resolve failed"). Assim roda no Git Bash e no
+  // PowerShell (que usa o tar do Windows).
+  const NOME_TEMP = "build-context.tar.gz";
+  execFileSync("tar", ["-czf", NOME_TEMP, "Dockerfile", "packages", "plugins"], {
     cwd: temp,
     stdio: "inherit"
   });
+  fs.mkdirSync(PASTA_RELEASES, { recursive: true });
+  fs.copyFileSync(path.join(temp, NOME_TEMP), SAIDA_VERSIONADA);
   fs.copyFileSync(SAIDA_VERSIONADA, SAIDA);
 
   const mb = (fs.statSync(SAIDA).size / 1024 / 1024).toFixed(2);
