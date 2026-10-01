@@ -51,8 +51,12 @@ const IGNORAR = new Set([
   "releases"
 ]);
 
-/** Arquivos que não são código nem doc — backups pontuais, não geram valor no pacote. */
-const IGNORAR_ARQUIVO = /^backup-.*\.json$/;
+/**
+ * Arquivos que não são código nem doc: backups pontuais e pacotes antigos
+ * renomeados na pasta (ex.: "build-context.tar(REMOVE).gz" — entrou inteiro no
+ * pacote da 0.1.11 na primeira tentativa, 800 KB a mais na imagem).
+ */
+const IGNORAR_ARQUIVO = /^backup-.*\.json$|^build-context.*\.gz$/;
 
 function copiar(origem: string, destino: string, ignorarTambem: string[] = []): void {
   const ignorar = new Set([...IGNORAR, ...ignorarTambem]);

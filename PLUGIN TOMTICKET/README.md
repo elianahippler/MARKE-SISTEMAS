@@ -6,6 +6,11 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.1.11 — botão mais alto (01/10/2026)
+
+O botão "Finalizar Chamado" ocupa a altura da barra do cabeçalho: 36px de
+altura, margem de 6px em cima e embaixo e 8px nas laterais, e logo de 20px.
+
 ## 0.1.9 — diálogo do "Finalizar Chamado" só com OK (01/10/2026)
 
 O diálogo não pergunta mais "Adicionar Resumo do Ticket? [Sim] [Não]". Tem só

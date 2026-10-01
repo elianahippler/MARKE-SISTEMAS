@@ -265,9 +265,11 @@ export const BOTAO_FINALIZAR = `
     irParaLista();
   }
 
+  // Altura da barra do cabeçalho (≈48px) menos a margem de 6px em cima e embaixo.
   const estiloDoBotao = {
-    marginRight: 8,
-    padding: "2px 10px",
+    margin: "6px 8px",
+    height: 36,
+    padding: "0 14px",
     textTransform: "none",
     whiteSpace: "nowrap",
     fontWeight: 600,
@@ -286,7 +288,7 @@ export const BOTAO_FINALIZAR = `
             size="small"
             variant="outlined"
             disabled={!disponivel}
-            startIcon={<img src="${LOGO_TOMTICKET}" alt="" width={16} height={16} />}
+            startIcon={<img src="${LOGO_TOMTICKET}" alt="" width={20} height={20} />}
             style={estiloDoBotao}
             onClick={function () { setErro(null); setAviso(null); setAberto(true); }}
           >
