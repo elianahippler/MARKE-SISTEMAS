@@ -11,7 +11,9 @@ dos dois lados.
 **Botão "Finalizar Chamado (#protocolo) TomTicket".** É o antigo "Resolver +
 TomTicket", com novo nome, contorno laranja suave e borda de 2px. Agora ele
 **fica sempre visível**: sem chamado aberto, aparece desabilitado e mostra o
-motivo ao passar o mouse. O bug de "às vezes não aparece" vinha da consulta ao
+motivo ao passar o mouse. O diálogo não pergunta mais "Adicionar Resumo do
+Ticket? [Sim] [Não]": tem só **Cancelar** e **OK**, e o resumo da IA vai sempre
+que houver plugin de IA configurado. O bug de "às vezes não aparece" vinha da consulta ao
 chamado, feita uma vez só, ao abrir o ticket. Quando o chamado nascia depois,
 na primeira mensagem, o botão ficava escondido. Agora a consulta se repete a
 cada 10 s enquanto o ticket está na tela.

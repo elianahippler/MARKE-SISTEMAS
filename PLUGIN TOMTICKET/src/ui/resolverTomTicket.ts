@@ -309,23 +309,18 @@ export const BOTAO_FINALIZAR = `
               <Typography variant="body2">{etapa}</Typography>
             </Box>
           ) : (
-            <Typography variant="body1">Adicionar Resumo do Ticket?</Typography>
-          )}
-          {!rota && !ocupado && (
-            <Typography variant="caption" color="textSecondary" display="block" style={{ marginTop: 8 }}>
-              Nenhum plugin de IA configurado (aba IA do TomTicket): o chamado será finalizado sem resumo e sem assunto.
+            <Typography variant="body2">
+              {rota
+                ? "O resumo do atendimento (gerado pela IA) vai junto na finalização, e o atendimento é resolvido no Markedesk."
+                : "O atendimento é resolvido no Markedesk. Nenhum plugin de IA configurado (aba IA do TomTicket): o chamado sai sem resumo e sem assunto."}
             </Typography>
           )}
-          <Typography variant="caption" color="textSecondary" display="block" style={{ marginTop: 8 }}>
-            O atendimento também é resolvido no Markedesk.
-          </Typography>
           {aviso && <Typography variant="caption" display="block" style={{ marginTop: 8, color: "#b26a00" }}>{aviso}</Typography>}
           {erro && <Typography variant="body2" color="error" style={{ marginTop: 8 }}>{erro}</Typography>}
         </DialogContent>
         <DialogActions>
           <Button onClick={function () { setAberto(false); }} disabled={ocupado}>Cancelar</Button>
-          <Button onClick={function () { executar(false); }} disabled={ocupado} variant="outlined" color="primary">Não</Button>
-          <Button onClick={function () { executar(true); }} disabled={ocupado || !rota} variant="contained" color="primary">Sim</Button>
+          <Button onClick={function () { executar(true); }} disabled={ocupado} variant="contained" color="primary">OK</Button>
         </DialogActions>
       </Dialog>
 
