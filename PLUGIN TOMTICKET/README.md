@@ -6,6 +6,34 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.1.7 — notas internas, tempo trabalhado, diagnóstico e ícone (01/10/2026)
+
+**Notas internas nunca viram resposta visível.** Foi verificado no backend
+4.10.4 em produção: a nota privada não dispara `message:sent` /
+`ticket:messageSent` (ela tem evento próprio, `note:created`). Hoje ela não
+chega ao plugin. Mesmo assim, se um dia chegar uma mensagem com `isPrivate`,
+ela entra como **comentário interno** ("📝 Nota interna (Fulano): …") e nunca
+abre chamado. Assim, uma mudança no core não expõe o recado ao cliente.
+
+**Tempo trabalhado na finalização.** O "Resolver + TomTicket" envia
+`time_work`, em minutos, contados da abertura do chamado (`creation_date` do
+próprio TomTicket) até a finalização. O TomTicket guarda em segundos: 1 minuto
+aparece como `work_time: 60`. Isso foi testado no chamado 74122.
+
+**Aba Diagnóstico.** Mostra os últimos 200 registros do plugin, com filtros
+"Erros e avisos", "Chamados" e "Tudo". O plugin captura no `console` as linhas
+com prefixo `[TomTicket]` (`src/diagnostico.ts`); assim qualquer log novo entra
+sem precisar registrar ponto a ponto. Os registros ficam no PluginStorage, com
+espera de 5 s entre gravações, e sobrevivem ao restart de cada atualização.
+
+**Ícone.** O card do plugin no Markedesk só aceita símbolos de um mapa fechado,
+sem imagem. Agora usa "Chat" na cor da marca (`#F76045`). O logo oficial
+(favicon de tomticket.com, embutido em `src/ui/logoTomTicket.ts`) aparece no
+botão "Resolver + TomTicket" e no diálogo dele.
+
+Corrigido também: o ícone da aba IA era "SmartToy", que não existe no
+Material-UI v4 usado pelas abas. Agora é "Android".
+
 ## 0.1.6 — "Resolver + TomTicket" com resumo da IA (01/10/2026)
 
 Botão **"Resolver + TomTicket"** no cabeçalho do atendimento, ao lado do
@@ -401,6 +429,9 @@ Se o plugin for entrar no repositório de vez, o lugar dele é
 | `src/tomticketInstance.ts` | monta o `PluginServer`: hooks e rotas |
 | `src/config/settings.ts` | configuração por empresa (memória + PluginStorage) e resolvedores do de-para |
 | `src/fluxo/chamados.ts` | o espelhamento do atendimento no chamado (o coração do plugin) |
+| `src/diagnostico.ts` | captura dos logs do plugin para a aba Diagnóstico |
+| `src/ui/telaDeDiagnostico.ts` | a aba Diagnóstico |
+| `src/ui/logoTomTicket.ts` | ícone oficial do TomTicket, embutido |
 | `src/fluxo/finalizacao.ts` | assunto principal lido do resumo e texto de finalização do chamado |
 | `src/ui/resolverTomTicket.ts` | botão "Resolver + TomTicket" e aba IA |
 | `src/fluxo/mensagem.ts` | quem escreveu a mensagem, o texto e o anexo que vão para o chamado |

@@ -19,6 +19,8 @@
  * clicou; `props.api` é o mesmo, já apontado para as rotas deste plugin.
  */
 
+import { COR_TOMTICKET, LOGO_TOMTICKET } from "@/ui/logoTomTicket";
+
 export const BOTAO_RESOLVER = `
   const { useState, useEffect } = React;
   const { Button, Dialog, DialogTitle, DialogContent, DialogActions, CircularProgress, Typography, Box } = props.mui;
@@ -126,15 +128,20 @@ export const BOTAO_RESOLVER = `
       <Button
         size="small"
         variant="outlined"
-        color="primary"
-        style={{ marginRight: 8, textTransform: "none", whiteSpace: "nowrap" }}
+        startIcon={<img src="${LOGO_TOMTICKET}" alt="" width={16} height={16} />}
+        style={{ marginRight: 8, textTransform: "none", whiteSpace: "nowrap", color: "${COR_TOMTICKET}", borderColor: "${COR_TOMTICKET}" }}
         onClick={function () { setErro(null); setAviso(null); setAberto(true); }}
       >
         Resolver + TomTicket
       </Button>
 
       <Dialog open={aberto} onClose={function () { if (!ocupado) setAberto(false); }} maxWidth="xs" fullWidth>
-        <DialogTitle>Resolver e finalizar o chamado {protocolo ? "#" + protocolo : ""} no TomTicket</DialogTitle>
+        <DialogTitle>
+          <Box display="flex" alignItems="center" style={{ gap: 8 }}>
+            <img src="${LOGO_TOMTICKET}" alt="" width={22} height={22} />
+            <span>Resolver e finalizar o chamado {protocolo ? "#" + protocolo : ""} no TomTicket</span>
+          </Box>
+        </DialogTitle>
         <DialogContent>
           {ocupado ? (
             <Box display="flex" alignItems="center" style={{ gap: 12 }} py={1}>

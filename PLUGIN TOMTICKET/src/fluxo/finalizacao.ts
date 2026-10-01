@@ -58,3 +58,18 @@ export function textoDeFinalizacao(opcoes: {
   if (opcoes.comResumo && opcoes.resumo) partes.push(`Resumo do atendimento (gerado por IA):\n${opcoes.resumo.trim()}`);
   return partes.length ? partes.join("\n\n") : "Atendimento finalizado no Markedesk.";
 }
+
+/**
+ * Minutos entre uma data do TomTicket e agora (mínimo 1), ou `undefined`.
+ *
+ * O TomTicket escreve as datas como "2026-09-30 16:46:10-03" (o detalhe) ou
+ * "...-03:00" (a lista) — nenhuma das duas é ISO que o `Date` aceite em todo
+ * lugar: falta o "T" e, na primeira, os minutos do fuso.
+ */
+export function minutosDesde(data?: string | null, agora = Date.now()): number | undefined {
+  if (!data) return undefined;
+  const iso = String(data).trim().replace(" ", "T").replace(/([+-]\d{2})$/, "$1:00");
+  const inicio = Date.parse(iso);
+  if (Number.isNaN(inicio) || inicio > agora) return undefined;
+  return Math.max(1, Math.round((agora - inicio) / 60_000));
+}

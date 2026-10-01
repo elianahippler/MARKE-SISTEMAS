@@ -3,6 +3,7 @@ import { metadata } from "@/metadata";
 import { LOG } from "@/identidade";
 import { TomTicketApi } from "@/tomticket/api";
 import { FluxoChamados } from "@/fluxo/chamados";
+import { capturarLogs, lerDiagnostico } from "@/diagnostico";
 import {
   clienteTomTicket,
   guardarNaMemoria,
@@ -161,6 +162,11 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
         (await api.listarAtendentes()).map(a => ({ value: a.id, label: a.name }))
       );
 
+      /** Últimos erros, avisos e chamados — a aba Diagnóstico. */
+      router.get("/diagnostico", async (_req, res) => {
+        return res.json(await lerDiagnostico());
+      });
+
       /**
        * O chamado do ticket, para o botão "Resolver + TomTicket".
        *
@@ -263,6 +269,7 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
   });
 
   fluxo = new FluxoChamados(server);
+  capturarLogs(server);
 
   return { server };
 }

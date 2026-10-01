@@ -3,6 +3,7 @@ import { PLUGIN_ID, PLUGIN_NOME } from "@/identidade";
 import { TELA_DE_CATEGORIAS } from "@/ui/telaDeCategorias";
 import { TELA_DE_ATENDENTES, TELA_DE_FILAS } from "@/ui/telaDeDePara";
 import { BOTAO_RESOLVER, TELA_DE_IA } from "@/ui/resolverTomTicket";
+import { TELA_DE_DIAGNOSTICO } from "@/ui/telaDeDiagnostico";
 
 /**
  * O que este plugin oferece.
@@ -17,9 +18,12 @@ import { BOTAO_RESOLVER, TELA_DE_IA } from "@/ui/resolverTomTicket";
 export const metadata = definePlugin({
   id: PLUGIN_ID,
   displayName: PLUGIN_NOME,
-  color: "#0B7FD4",
-  icon: "Forum",
-  version: "0.1.6",
+  // Cor e símbolo mais próximos da marca: o ícone do TomTicket é um balão
+  // em forma de ticket, coral. Imagem não é aceita aqui (mapa fechado abaixo);
+  // o logo de verdade aparece no botão "Resolver + TomTicket".
+  color: "#F76045",
+  icon: "Chat",
+  version: "0.1.7",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 
@@ -52,7 +56,8 @@ export const metadata = definePlugin({
       { name: "atendentes", label: "Atendentes", icon: "People", order: 1 },
       { name: "filas", label: "Filas", icon: "Forum", order: 2 },
       { name: "categorias", label: "Categorias", icon: "Category", order: 3 },
-      { name: "ia", label: "IA", icon: "SmartToy", order: 4 }
+      { name: "ia", label: "IA", icon: "Android", order: 4 },
+      { name: "diagnostico", label: "Diagnóstico", icon: "BugReport", order: 5 }
     ],
 
     settings: [
@@ -153,6 +158,16 @@ export const metadata = definePlugin({
         type: "jsx",
         tab: "ia",
         content: TELA_DE_IA
+      } as any,
+
+      /**
+       * Últimos erros, avisos e chamados. Sem `name`: só mostra, não grava
+       * nada na configuração.
+       */
+      {
+        type: "jsx",
+        tab: "diagnostico",
+        content: TELA_DE_DIAGNOSTICO
       } as any
     ],
 

@@ -23,7 +23,7 @@ import {
   type ConfiguracaoTomTicket
 } from "@/config/settings";
 import { autorDaMensagem, baixarAnexo, corpoDaMensagem, emPartes, resumo, type Autor } from "@/fluxo/mensagem";
-import { extrairAssunto, textoDeFinalizacao } from "@/fluxo/finalizacao";
+import { extrairAssunto, minutosDesde, textoDeFinalizacao } from "@/fluxo/finalizacao";
 
 /** O que guardamos sobre o chamado de um ticket. */
 interface VinculoChamado {
@@ -491,6 +491,23 @@ export class FluxoChamados {
     const corpo = corpoDaMensagem(message, !!anexo);
 
     let vinculo = await this.lerVinculo(ticket?.id);
+
+    // Nota interna do atendente: recado da equipe, que o cliente NÃO vê. Hoje
+    // o backend nem a manda como "mensagem enviada" (ela tem evento próprio,
+    // note:created) — esta trava existe para o dia em que isso mudar: como
+    // resposta, ela ficaria visível ao cliente no TomTicket. Também nunca abre
+    // chamado: nota não é atendimento.
+    if (message?.isPrivate) {
+      if (!vinculo || vinculo.finalizado) return;
+      const nome = ticket?.user?.name || "Atendente";
+      try {
+        await this.emEnvios(`📝 Nota interna (${nome}): ${corpo}`, null, parte => api.comentarChamado(vinculo!.chamadoId, parte));
+      } catch (err: any) {
+        console.error(`${LOG} falha ao registrar nota interna no chamado ${vinculo.chamadoId}: ${err?.message || err}`);
+      }
+      return;
+    }
+
     if (vinculo?.finalizado) {
       // O que chega com o ticket ainda fechado (despedida, pedido de avaliação,
       // a nota do cliente) pertence ao atendimento que acabou — e responder
@@ -595,6 +612,22 @@ export class FluxoChamados {
     await this.emEnvios(corpo, anexo, comoAtendente);
   }
 
+  /**
+   * Tempo trabalhado para a finalização: da abertura do chamado até agora.
+   *
+   * A abertura vem do próprio TomTicket (`creation_date`), e não do vínculo,
+   * para valer também nos chamados abertos antes desta versão. Sem a data, a
+   * finalização sai sem o tempo — melhor que um número inventado.
+   */
+  private async minutosDoChamado(api: TomTicketApi, chamadoId: string): Promise<number | undefined> {
+    try {
+      const { data } = await api.detalharChamado(chamadoId);
+      return minutosDesde(data?.creation_date);
+    } catch {
+      return undefined;
+    }
+  }
+
   /** O chamado do ticket, para o botão "Resolver + TomTicket" saber se aparece. */
   async consultar(ticketId: number | string): Promise<{ protocolo?: string; finalizado: boolean } | null> {
     const vinculo = await this.lerVinculo(ticketId);
@@ -657,12 +690,13 @@ export class FluxoChamados {
 
     // Texto longo: as primeiras partes como respostas, a última finaliza.
     for (const parte of partes.slice(0, -1)) await api.responderComoAtendente(vinculo.chamadoId, parte);
-    await api.finalizarChamado(vinculo.chamadoId, partes[partes.length - 1]);
+    const minutos = await this.minutosDoChamado(api, vinculo.chamadoId);
+    await api.finalizarChamado(vinculo.chamadoId, partes[partes.length - 1], minutos);
 
     vinculo.finalizado = true;
     await this.gravarVinculo(dados.ticketId, vinculo);
     console.log(
-      `${LOG} chamado ${vinculo.chamadoId} finalizado pelo ticket ${dados.ticketId}${assunto ? ` (assunto: ${assunto})` : ""}${dados.comResumo ? " com resumo" : ""}`
+      `${LOG} chamado ${vinculo.protocolo || vinculo.chamadoId} finalizado pelo ticket ${dados.ticketId}${assunto ? ` (assunto: ${assunto})` : ""}${dados.comResumo ? " com resumo" : ""}${minutos ? `, ${minutos} min` : ""}`
     );
     return { protocolo: vinculo.protocolo, assunto };
   }
