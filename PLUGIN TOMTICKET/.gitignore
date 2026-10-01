@@ -2,7 +2,7 @@ node_modules/
 data/
 dist/
 *.log
-build-context.tar.gz
+build-context*.gz
 releases/
 
 # Backup pontual do workflow de produção do n8n antes de editar (30/09/2026) —

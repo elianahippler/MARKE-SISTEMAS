@@ -28,7 +28,7 @@ import os from "node:os";
 import { execFileSync } from "node:child_process";
 
 const RAIZ_PLUGIN = path.resolve(import.meta.dirname, "..");
-const SDK = "C:/markedesk-ng-main/markedesk-ng-main/packages/plugin-sdk";
+const SDK = "C:/REPOSITORIO MARKEDESK/markedesk-ng-main/markedesk-ng-main/packages/plugin-sdk";
 const SAIDA = path.join(RAIZ_PLUGIN, "build-context.tar.gz");
 
 const { version } = JSON.parse(fs.readFileSync(path.join(RAIZ_PLUGIN, "package.json"), "utf8"));

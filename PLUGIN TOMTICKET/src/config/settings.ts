@@ -31,6 +31,15 @@ export interface ConfiguracaoTomTicket {
   /** Token de API (Bearer) gerado no painel do TomTicket. */
   apiToken?: string;
   atendentes?: MapeamentoAtendente[];
+  /**
+   * Atendente do TomTicket que assina as mensagens automáticas (menu, saudação,
+   * transferência, posição na fila).
+   *
+   * Precisa ser ATENDENTE, não cliente: a API só deixa responder em nome do
+   * atendente vinculado ou do cliente dono do chamado — não há como escolher
+   * outro cliente. Vazio, a mensagem automática entra como comentário interno.
+   */
+  operadorBotId?: string;
   filas?: MapeamentoFila[];
   /**
    * Categoria padrão de cada setor: `{ [departamentoId]: categoriaId }`.
@@ -64,6 +73,15 @@ export interface ConfiguracaoTomTicket {
    * desliga a gravação, e o plugin segue funcionando pelo PluginStorage.
    */
   webhookVinculo?: string;
+  /**
+   * Plugin de IA que gera o resumo no "Resolver + TomTicket" (id dele no
+   * Markedesk, ex.: "ai-tools").
+   *
+   * Configurável porque o resumo é chamado pela rota do OUTRO plugin
+   * (`/p/{hash}/{id}/acoes/resumir`), e a empresa pode ter o AI-Tools com outro
+   * id — ou nenhum. Vazio: o chamado é finalizado sem resumo nem assunto.
+   */
+  pluginIaId?: string;
 }
 
 /**

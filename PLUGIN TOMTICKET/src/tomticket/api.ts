@@ -26,6 +26,18 @@ export interface RespostaTomTicket<T = any> {
   protocol?: number;
 }
 
+/**
+ * Arquivo enviado junto de um chamado ou resposta.
+ *
+ * A API recebe como `attachment[0]`, `attachment[1]`... (confirmado ao vivo em
+ * 01/10/2026 — imagem e áudio chegaram no chamado). Limite dela: 25 MB somando
+ * a requisição inteira, 25 arquivos.
+ */
+export interface Anexo {
+  nome: string;
+  dados: Blob;
+}
+
 export class ErroTomTicket extends Error {
   constructor(
     message: string,
@@ -42,7 +54,7 @@ export class TomTicketApi {
   private async chamar<T>(
     metodo: "GET" | "POST",
     caminho: string,
-    opcoes: { query?: Record<string, any>; form?: Record<string, any> } = {},
+    opcoes: { query?: Record<string, any>; form?: Record<string, any>; anexos?: Anexo[] } = {},
     tentativa = 1
   ): Promise<RespostaTomTicket<T>> {
     let url = `${API_BASE}${caminho}`;
@@ -69,6 +81,7 @@ export class TomTicketApi {
         if (valor === undefined || valor === null || valor === "") continue;
         fd.append(chave, String(valor));
       }
+      (opcoes.anexos || []).forEach((anexo, i) => fd.append(`attachment[${i}]`, anexo.dados, anexo.nome));
       init.body = fd;
     }
 
@@ -137,8 +150,9 @@ export class TomTicketApi {
     priority?: number;
     /** Campos personalizados por id: `{ "<idDoCampo>": "valor" }`. */
     custom_field?: Record<string, string>;
+    anexos?: Anexo[];
   }) {
-    const { custom_field, ...resto } = dados;
+    const { custom_field, anexos, ...resto } = dados;
     const form: Record<string, any> = { ...resto };
 
     // form-data não tem objeto aninhado: a API espera cada campo como
@@ -148,7 +162,7 @@ export class TomTicketApi {
       form[`custom_field[${id}]`] = valor;
     }
 
-    return this.chamar<any>("POST", "/ticket/new", { form });
+    return this.chamar<any>("POST", "/ticket/new", { form, anexos });
   }
 
   /**
@@ -220,15 +234,28 @@ export class TomTicketApi {
     return null;
   }
 
-  responderComoAtendente(ticketId: string, mensagem: string) {
+  /**
+   * Resposta em nome do atendente VINCULADO ao chamado — a API não tem como
+   * escolher outro autor.
+   *
+   * Sem nenhum atendente vinculado, a resposta é gravada como do CLIENTE
+   * (`sender_type: "C"`), sem erro nenhum — confirmado ao vivo em 01/10/2026.
+   * Era isso que fazia as mensagens do bot aparecerem como do cliente: elas
+   * saem antes de alguém aceitar o atendimento. Quem chama precisa garantir o
+   * atendente certo vinculado antes.
+   */
+  responderComoAtendente(ticketId: string, mensagem: string, anexos?: Anexo[]) {
     return this.chamar("POST", "/ticket/reply/operator", {
-      form: { ticket_id: ticketId, message: mensagem }
+      form: { ticket_id: ticketId, message: mensagem },
+      anexos
     });
   }
 
-  responderComoCliente(ticketId: string, mensagem: string) {
+  /** Resposta em nome do cliente DO CHAMADO — a API não aceita outro cliente. */
+  responderComoCliente(ticketId: string, mensagem: string, anexos?: Anexo[]) {
     return this.chamar("POST", "/ticket/reply/customer", {
-      form: { ticket_id: ticketId, message: mensagem }
+      form: { ticket_id: ticketId, message: mensagem },
+      anexos
     });
   }
 

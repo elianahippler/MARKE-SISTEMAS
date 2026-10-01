@@ -6,6 +6,121 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.1.6 — "Resolver + TomTicket" com resumo da IA (01/10/2026)
+
+Botão **"Resolver + TomTicket"** no cabeçalho do atendimento, ao lado do
+Resolver. Só aparece quando o atendimento tem chamado aberto. O fluxo:
+
+1. Pergunta "Adicionar Resumo do Ticket? [Sim] [Não]".
+2. Pede o resumo ao plugin de IA configurado na aba **IA**
+   (`POST /p/{hash}/{id}/acoes/resumir`, com a sessão de quem clicou). Pede
+   **sempre**, mesmo com "Não", porque é do resumo que sai o "Assunto principal".
+3. Finaliza o chamado (`POST /chamado/finalizar` → `/ticket/finish`), em nome
+   de quem resolveu. O texto começa com "Assunto principal: …" (se o resumo
+   tiver essa linha) e, com "Sim", traz o resumo inteiro.
+4. Só então resolve o atendimento, **sem** despedida (`PUT /tickets/:id`, igual
+   ao "Resolver SEM mensagem"). Se o passo 3 falhar, o atendimento fica aberto.
+
+Por que botão e não uma 3ª opção no diálogo "Resolver":
+- os botões do diálogo são fixos no core;
+- o "Resolver" do cabeçalho chama a API direto, sem passar pelo interceptador
+  `resolve-ticket` (só o resolver da lista passa).
+
+**O chamado não é renomeado:** a API do TomTicket não tem edição de chamado.
+Isso foi verificado: nada na documentação, 22 rotas testadas (todas 404),
+PUT/PATCH bloqueados e `subject` ignorado na transferência. Por isso o assunto
+vai no texto da finalização.
+
+Depois de finalizado, o vínculo fica marcado: o que chega com o ticket ainda
+fechado (despedida, avaliação) é ignorado, para não reabrir o chamado. Se o
+cliente escrever com o ticket reaberto, abre um chamado novo.
+
+O assunto é lido do texto livre do resumo (`src/fluxo/finalizacao.ts`). Aceita
+"**Assunto principal:** X", "- Assunto principal: X", "1. Assunto principal: X"
+ou o rótulo numa linha e o assunto na seguinte. Sem o rótulo, nada é inventado.
+
+## 0.1.5 — de-para por nome, assunto fixo, texto sem corte (01/10/2026)
+
+**Atendentes e Filas escolhidos por nome**, dos dois lados. O id do TomTicket
+fica só no valor gravado. Saíram o campo de texto para colar o id e o bloco de
+referência da 0.1.3.
+
+A causa real do seletor vazio da 0.1.3 era outra: dentro de um item de `list`,
+o host monta os campos SEM `routePath` (`ListFieldRenderer` em
+`PluginSettingsForm/index.js`), e o `select` com `endpoint` nem tenta buscar.
+Não tinha a ver com o momento em que o token foi salvo. As duas abas agora são
+desenhadas pelo plugin (`src/ui/telaDeDePara.ts`). As listas do Markedesk vêm
+por rotas do plugin (`/opcoes/usuarios-markedesk`, `/opcoes/filas-markedesk`),
+que usam `listUsers`/`listQueues` do SDK, porque a tela JSX só alcança o
+plugin. O atendente Bot é escolhido na mesma aba. O formato salvo não mudou.
+
+**Assunto fixo:** todo chamado abre como "Chamado Recebido (Origem: Markedesk)".
+
+**Texto sem corte:** a API aceitou 20.000 caracteres inteiros, apesar dos 512 da
+documentação. Acima disso, a mensagem vai em partes numeradas. Só o resumo
+enviado ao webhook do n8n continua em 512.
+
+**PDF recebido sem arquivo não é do TomTicket.** O plugin do canal HardAPI
+entrega o documento ao Markedesk sem conteúdo quando o download no WhatsApp
+falha. Caso visto: `url` vencida, de um PDF reaproveitado, enquanto o
+`directPath` estava válido. O Markedesk grava a mensagem com `mediaUrl` vazio,
+e não há arquivo para anexar.
+
+## 0.1.4 — autor certo nas mensagens automáticas + mídia no chamado (01/10/2026)
+
+**Mensagens automáticas apareciam como do cliente.** Menu de filas, saudação,
+"a equipe X irá te atender", posição na fila: tudo entrava no chamado como
+resposta do CLIENTE. Duas causas, ambas confirmadas ao vivo:
+
+1. `/ticket/reply/operator` em chamado **sem atendente vinculado** é gravado
+   como do cliente (`sender_type: "C"`), sem erro. As mensagens do bot saem
+   justamente antes de alguém aceitar, quando o chamado ainda não tem atendente.
+2. O autor era decidido só pelo nome do evento. Dependendo da versão do
+   backend, o que o bot manda pelos canais de plugin (whatsapp_hardapi) chega
+   como `ticket:messageReceived`.
+
+Agora o autor sai da própria mensagem (`src/fluxo/mensagem.ts`):
+
+| Mensagem | Autor no chamado |
+|---|---|
+| `fromMe: false` | cliente |
+| começa com U+200E (a marca que o Markedesk põe em toda mensagem automática) | Bot |
+| `source` = bot, system, flow, campaign, schedule, plugin ou api | Bot |
+| `source` = agent | atendente |
+| outras do nosso lado, com o ticket sem atendente ou fora de "open" | Bot |
+| outras do nosso lado, com o ticket aceito | atendente |
+
+**O Bot precisa ser um ATENDENTE no TomTicket**, informado na aba Atendentes
+("ID do atendente Bot no TomTicket"). O cadastro `bot@markesistemas.com.br`
+existente é de **cliente**, e não serve: a API não deixa escolher o autor de
+uma resposta. A de cliente sai sempre em nome do dono do chamado, e a de
+atendente sai em nome de quem está vinculado. Por isso o plugin vincula o
+atendente Bot antes de cada mensagem automática e devolve o chamado à pessoa
+antes de cada mensagem dela. Sem o Bot configurado, a mensagem automática entra
+como **comentário interno**, nunca como cliente.
+
+Com o Bot configurado, o chamado já nasce com ele vinculado. Isso também
+destrava a transferência de setor, que a API recusa em chamado sem atendente
+(o `departamentoPendente` quase não é mais usado).
+
+A saudação de aceite ("meu nome é *Fulano* e darei continuidade") é enviada
+pelo frontend como mensagem comum do atendente, sem marca nenhuma, e por isso
+entra em nome da pessoa que aceitou.
+
+**Mídia entra como anexo.** Imagem, áudio, vídeo, figurinha e documento são
+baixados de `media.url` (a pasta `/public` do backend, aberta) e enviados como
+`attachment[0]`. O texto da resposta leva o tipo ("[Imagem]", "[Áudio]"...) e a
+legenda, se houver. Arquivo acima de 24 MB, ou que não pôde ser baixado, vai sem
+anexo, com aviso no texto.
+
+**Eventos de um ticket rodam em fila.** A mensagem do cliente e a resposta do
+bot chegam quase juntas. Rodando em paralelo, as duas viam "sem chamado" e
+cada uma abria o seu, e as respostas podiam entrar fora de ordem.
+
+Atualizado também o caminho do SDK: `C:/markedesk-ng-main` foi movido para
+`C:/REPOSITORIO MARKEDESK/markedesk-ng-main`, e o SDK lá precisou de
+`npm install && npm run build` (não tinha `dist`).
+
 ## 0.1.3 — atendentes e departamentos viram texto + referência (30/09/2026)
 
 O `select` dependente de `endpoint` (usado em "Atendente no TomTicket" e
@@ -64,12 +179,13 @@ Feedback de uso real na tela de configuração, em produção:
 | `ticket:transferred` (primeira fila, chamado já aberto) | **Transfere** o chamado para o setor daquela fila |
 | `ticket:transferred` (troca posterior) | Abre um chamado **novo** no setor de destino |
 | `ticket:assigned` | Vincula o atendente correspondente ao chamado |
-| `ticket:messageReceived` | Entra como resposta **do cliente** (ou abre o chamado, se for a primeira) |
-| `ticket:messageSent` | Entra como resposta **do atendente** (ou abre o chamado, se for a primeira) |
+| `ticket:messageReceived` / `ticket:messageSent` | Entra como resposta do **cliente**, do **atendente** ou do **Bot**, conforme quem escreveu (ver 0.1.4), com a mídia anexada; ou abre o chamado, se for a primeira |
 
 **Ticket sem nenhuma mensagem nunca vira chamado.** É a primeira mensagem —
 enviada ou recebida, tanto faz — que abre o chamado; um ticket criado e nunca
-respondido não gera lixo no TomTicket.
+respondido não gera lixo no TomTicket. Se ela for do cliente, vira o conteúdo
+inicial (que o TomTicket sempre atribui ao cliente). Se for do nosso lado, o
+chamado abre com um texto neutro e ela entra como resposta, com o autor certo.
 
 O cliente é identificado pelo **email**: o do contato no Markedesk tem que ser o
 mesmo do cliente no TomTicket. Contato sem email não gera chamado (fica no log).
@@ -152,10 +268,18 @@ real da Marke, e moldam o design do fluxo:
   sempre, mesmo repetindo o atendente já vinculado. A API tem um endpoint
   separado que funciona de verdade: `vincularAtendente`
   (`/ticket/operator/link`).
-- **Vincular o mesmo atendente duas vezes seguidas falha** ("does not allow
-  adding an operator") — por isso `transferirComAtendente` aceita um flag
-  `jaVinculado` para pular a chamada redundante quando o chamador acabou de
-  vincular.
+- **Vincular em chamado que já tem atendente falha** ("This ticket does not
+  allow adding an operator"), seja o mesmo atendente ou outro. A saída,
+  confirmada em 01/10/2026: transferir para o **próprio setor atual** limpa o
+  atendente sem mexer em setor, categoria nem situação, e aí o vínculo passa.
+  `garantirAtendente` faz isso sozinho, e `VinculoChamado.operadorAtual` evita
+  a troca quando o atendente já é o certo.
+- **`/ticket/reply/operator` em chamado sem atendente é gravado como do
+  cliente** (01/10/2026), sem erro. A resposta de atendente sai sempre em nome
+  de quem está vinculado; a de cliente, sempre em nome do dono do chamado. Não
+  há parâmetro para escolher outro autor.
+- **Anexos** vão como `attachment[0]`, `attachment[1]`... no mesmo
+  `multipart/form-data`, até 25 MB por requisição (testado com imagem e áudio).
 - A API tem **rate limit** (HTTP 429, página HTML do nginx, não JSON) sob
   rajada de chamadas — algumas ações do fluxo (criar, vincular, transferir,
   revincular) disparam várias chamadas em sequência rápida. `chamar()` tenta
@@ -163,9 +287,13 @@ real da Marke, e moldam o design do fluxo:
 
 ### Outros limites conhecidos
 
-- Mensagem é cortada em **512 caracteres** (limite da API do TomTicket).
-- Mídia sem legenda entra como `[image]`, `[audio]`, etc. — o arquivo em si não
-  é enviado ao chamado.
+- A documentação do TomTicket fala em 512 caracteres por resposta, mas a API grava
+  pelo menos **20.000** inteiros (testado em 01/10/2026). Acima disso a mensagem
+  vai em partes numeradas — "(parte 1/3)" — em vez de cortada.
+- Mídia acima de **24 MB** entra só como texto ("[Vídeo (arquivo não anexado —
+  ver no Markedesk)]"), porque a API aceita 25 MB pela requisição inteira.
+- Atendente do Markedesk sem de-para na aba Atendentes: a mensagem dele sai em
+  nome do Bot (fica no log).
 
 ## Configuração (Plugins → TomTicket → Configurar)
 
@@ -174,7 +302,7 @@ Quatro abas:
 | Aba | O que se informa |
 |---|---|
 | **Conexão** | Token da API + botão "Testar conexão" |
-| **Atendentes** | De-para: atendente do Markedesk → atendente do TomTicket |
+| **Atendentes** | De-para: atendente do Markedesk → atendente do TomTicket, e o **atendente Bot** das mensagens automáticas |
 | **Filas** | De-para: fila do Markedesk → setor do TomTicket |
 | **Categorias** | Setor/categoria do **chamado inicial** + uma categoria padrão por setor |
 
@@ -250,7 +378,7 @@ nada.
 `package.json` aponta o `@markedesk/plugin-sdk` por caminho absoluto:
 
 ```
-file:C:/markedesk-ng-main/markedesk-ng-main/packages/plugin-sdk
+file:C:/REPOSITORIO MARKEDESK/markedesk-ng-main/markedesk-ng-main/packages/plugin-sdk
 ```
 
 Isso existe porque esta pasta está **fora** do monorepo. Duas consequências:
@@ -273,7 +401,11 @@ Se o plugin for entrar no repositório de vez, o lugar dele é
 | `src/tomticketInstance.ts` | monta o `PluginServer`: hooks e rotas |
 | `src/config/settings.ts` | configuração por empresa (memória + PluginStorage) e resolvedores do de-para |
 | `src/fluxo/chamados.ts` | o espelhamento do atendimento no chamado (o coração do plugin) |
+| `src/fluxo/finalizacao.ts` | assunto principal lido do resumo e texto de finalização do chamado |
+| `src/ui/resolverTomTicket.ts` | botão "Resolver + TomTicket" e aba IA |
+| `src/fluxo/mensagem.ts` | quem escreveu a mensagem, o texto e o anexo que vão para o chamado |
 | `src/ui/telaDeCategorias.ts` | a aba Categorias, desenhada pelo plugin (JSX-string) |
+| `src/ui/telaDeDePara.ts` | as abas Atendentes e Filas, escolha por nome dos dois lados |
 | `src/tomticket/api.ts` | cliente da API REST do TomTicket v2.0 |
 | `scripts/checarJsx.mts` | transpila as telas JSX para pegar erro de sintaxe |
 | `scripts/empacotar.mts` | monta o `build-context.tar.gz` para o build no Portainer |
