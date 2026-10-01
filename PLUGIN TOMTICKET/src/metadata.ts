@@ -2,7 +2,7 @@ import { definePlugin, defineStoreListing, HOOK_EVENTS } from "@markedesk/plugin
 import { PLUGIN_ID, PLUGIN_NOME } from "@/identidade";
 import { TELA_DE_CATEGORIAS } from "@/ui/telaDeCategorias";
 import { TELA_DE_ATENDENTES, TELA_DE_FILAS } from "@/ui/telaDeDePara";
-import { BOTAO_RESOLVER, TELA_DE_IA } from "@/ui/resolverTomTicket";
+import { BOTAO_FINALIZAR, TELA_DE_IA } from "@/ui/resolverTomTicket";
 import { TELA_DE_DIAGNOSTICO } from "@/ui/telaDeDiagnostico";
 
 /**
@@ -20,10 +20,10 @@ export const metadata = definePlugin({
   displayName: PLUGIN_NOME,
   // Cor e símbolo mais próximos da marca: o ícone do TomTicket é um balão
   // em forma de ticket, coral. Imagem não é aceita aqui (mapa fechado abaixo);
-  // o logo de verdade aparece no botão "Resolver + TomTicket".
+  // o logo de verdade aparece no botão "Finalizar Chamado".
   color: "#F76045",
   icon: "Chat",
-  version: "0.1.7",
+  version: "0.1.8",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 
@@ -152,7 +152,7 @@ export const metadata = definePlugin({
         content: TELA_DE_CATEGORIAS
       } as any,
 
-      /** Qual plugin de IA gera o resumo do "Resolver + TomTicket". */
+      /** Qual plugin de IA gera o resumo do "Finalizar Chamado" e da transferência. */
       {
         name: "pluginIaId",
         type: "jsx",
@@ -172,7 +172,9 @@ export const metadata = definePlugin({
     ],
 
     /**
-     * "Resolver + TomTicket", no cabeçalho do atendimento, ao lado do Resolver.
+     * "Finalizar Chamado (#protocolo) TomTicket", no cabeçalho do atendimento,
+     * ao lado do Resolver. O id continua "resolver-tomticket" (nome da 0.1.6)
+     * para não mudar a chave da ação já instalada.
      *
      * `render: "jsx"` (o plugin desenha o botão e o diálogo) não está no tipo
      * do SDK 1.28, mas o frontend 4.10.4 já trata — mesmo recurso que o
@@ -182,11 +184,11 @@ export const metadata = definePlugin({
     actions: [
       {
         id: "resolver-tomticket",
-        label: "Resolver + TomTicket",
+        label: "Finalizar Chamado TomTicket",
         icon: "Build",
         slot: "ticket-header",
         render: "jsx",
-        jsx: BOTAO_RESOLVER
+        jsx: BOTAO_FINALIZAR
       } as any
     ],
 

@@ -168,9 +168,9 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
       });
 
       /**
-       * O chamado do ticket, para o botão "Resolver + TomTicket".
+       * O chamado do ticket, para o botão "Finalizar Chamado".
        *
-       * O botão só aparece quando há chamado aberto — sem isto ele ofereceria
+       * O botão fica desabilitado sem chamado aberto — sem isto ele ofereceria
        * finalizar algo que não existe. Leva junto o plugin de IA configurado,
        * que a tela usa para pedir o resumo.
        */
@@ -186,10 +186,11 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
       /**
        * Finaliza o chamado do ticket. Chamado pela tela ANTES de resolver o
        * atendimento: se falhar, a tela avisa e o atendimento segue aberto, em
-       * vez de resolvido com o chamado pendurado no TomTicket.
+       * vez de resolvido com o chamado pendurado no TomTicket. Também ANTES de
+       * uma transferência sair (`motivo: "transferencia"`).
        */
       router.post("/chamado/finalizar", async (req, res) => {
-        const { ticketId, userId, comResumo, resumo } = req.body || {};
+        const { ticketId, userId, comResumo, resumo, motivo } = req.body || {};
         if (!ticketId) return res.status(400).json({ error: "ticketId ausente" });
 
         try {
@@ -197,13 +198,26 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
             ticketId,
             userId,
             comResumo: !!comResumo,
-            resumo: typeof resumo === "string" ? resumo : null
+            resumo: typeof resumo === "string" ? resumo : null,
+            motivo: motivo === "transferencia" ? "transferencia" : "resolvido"
           });
           return res.json({ ok: true, ...feito });
         } catch (err: any) {
           console.error(`${LOG} falha ao finalizar o chamado do ticket ${ticketId}: ${err?.message || err}`);
           return res.status(502).json({ error: err?.message || String(err) });
         }
+      });
+
+      /**
+       * A transcrição de um áudio, para o chamado. A tela manda e não espera:
+       * responde na hora, e o registro segue na fila do ticket.
+       */
+      router.post("/chamado/transcricao", async (req, res) => {
+        const { ticketId, wid, texto } = req.body || {};
+        if (!ticketId) return res.status(400).json({ error: "ticketId ausente" });
+
+        void fluxo.transcricao({ ticketId, wid, texto });
+        return res.json({ ok: true });
       });
 
       /**

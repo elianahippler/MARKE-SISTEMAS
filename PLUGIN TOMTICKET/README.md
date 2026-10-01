@@ -6,6 +6,52 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.1.8 — "Finalizar Chamado", transferência e transcrição (01/10/2026)
+
+**Botão "Finalizar Chamado (#protocolo) TomTicket".** É o antigo "Resolver +
+TomTicket", com novo nome, contorno laranja suave e borda de 2px. Agora ele
+**fica sempre visível**: sem chamado aberto, aparece desabilitado e mostra o
+motivo ao passar o mouse. O bug de "às vezes não aparece" vinha da consulta ao
+chamado, feita uma vez só, ao abrir o ticket. Quando o chamado nascia depois,
+na primeira mensagem, o botão ficava escondido. Agora a consulta se repete a
+cada 10 s enquanto o ticket está na tela.
+
+**Transferência finaliza o chamado, com resumo.** Ao transferir pela tela, o
+botão, antes de a transferência sair, gera o resumo pela IA e finaliza o
+chamado com "Atendimento transferido no Markedesk…", o assunto principal e o
+resumo. Isso precisa ser feito na tela porque o AI-Tools lê as mensagens com o
+login de quem clicou; pelo servidor, sem usuário, o resumo sairia vazio. A
+transferência pode demorar alguns segundos a mais, com um aviso embaixo.
+O servidor faz o resto:
+- troca de fila sem passar pela tela (fluxo, bot, API): finaliza sem resumo;
+- troca de fila: abre o chamado novo no setor de destino;
+- troca só de atendente: o chamado novo abre na próxima mensagem, de qualquer
+  lado.
+
+**Transcrição de áudio no chamado.** Quando alguém clica em "Transcrever" num
+áudio, o texto entra no chamado como **comentário interno** "🎙️ Áudio
+transcrito por inteligência artificial: …". Não entra como resposta: não foi
+ninguém que escreveu, e resposta de atendente iria por email ao cliente. Os
+avisos de falha do Markedesk ("Conversão pra texto falhou" etc.) são
+ignorados, e o mesmo áudio não entra duas vezes. O backend não avisa os
+plugins quando transcreve; quem percebe a transcrição é o botão, ao escutar a
+resposta da tela.
+
+**Assunto do chamado:** `Chamado Recebido | Origem: Markedesk | Ticket #<id do ticket>`.
+
+**Fora desta versão: botão de categoria.** A API do TomTicket não troca a
+categoria de um chamado já aberto (testado em 01/10/2026 no chamado 74127):
+- as rotas de categoria dão 404;
+- `/ticket/transfer` aceita `category_id` (e variantes), mas ignora;
+- `/ticket/finish` também ignora.
+
+Fica dependendo de pedido ao TomTicket.
+
+Testado ao vivo nos chamados 74128 a 74130. O 74128 foi finalizado pelo
+servidor na troca de fila e o 74129 foi aberto no setor novo. Já o 74129 foi
+finalizado pelo caminho da tela, com assunto e resumo, e o 74130 abriu em
+seguida. O evento repetido não abriu um quarto chamado.
+
 ## 0.1.7 — notas internas, tempo trabalhado, diagnóstico e ícone (01/10/2026)
 
 **Notas internas nunca viram resposta visível.** Foi verificado no backend
@@ -433,7 +479,7 @@ Se o plugin for entrar no repositório de vez, o lugar dele é
 | `src/ui/telaDeDiagnostico.ts` | a aba Diagnóstico |
 | `src/ui/logoTomTicket.ts` | ícone oficial do TomTicket, embutido |
 | `src/fluxo/finalizacao.ts` | assunto principal lido do resumo e texto de finalização do chamado |
-| `src/ui/resolverTomTicket.ts` | botão "Resolver + TomTicket" e aba IA |
+| `src/ui/resolverTomTicket.ts` | botão "Finalizar Chamado" (também na transferência e na transcrição) e aba IA |
 | `src/fluxo/mensagem.ts` | quem escreveu a mensagem, o texto e o anexo que vão para o chamado |
 | `src/ui/telaDeCategorias.ts` | a aba Categorias, desenhada pelo plugin (JSX-string) |
 | `src/ui/telaDeDePara.ts` | as abas Atendentes e Filas, escolha por nome dos dois lados |

@@ -74,7 +74,7 @@ export interface ConfiguracaoTomTicket {
    */
   webhookVinculo?: string;
   /**
-   * Plugin de IA que gera o resumo no "Resolver + TomTicket" (id dele no
+   * Plugin de IA que gera o resumo no "Finalizar Chamado" e na transferência (id dele no
    * Markedesk, ex.: "ai-tools").
    *
    * Configurável porque o resumo é chamado pela rota do OUTRO plugin

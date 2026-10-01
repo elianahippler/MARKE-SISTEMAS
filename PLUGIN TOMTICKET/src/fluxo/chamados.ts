@@ -23,7 +23,15 @@ import {
   type ConfiguracaoTomTicket
 } from "@/config/settings";
 import { autorDaMensagem, baixarAnexo, corpoDaMensagem, emPartes, resumo, type Autor } from "@/fluxo/mensagem";
-import { extrairAssunto, minutosDesde, textoDeFinalizacao } from "@/fluxo/finalizacao";
+import {
+  assuntoDoChamado,
+  extrairAssunto,
+  minutosDesde,
+  textoDaTranscricao,
+  textoDeFinalizacao,
+  transcricaoValida,
+  type MotivoDaFinalizacao
+} from "@/fluxo/finalizacao";
 
 /** O que guardamos sobre o chamado de um ticket. */
 interface VinculoChamado {
@@ -55,20 +63,49 @@ interface VinculoChamado {
   /** Email com que o cliente foi identificado no TomTicket. */
   clienteEmail: string;
   /**
-   * O chamado foi finalizado junto com o atendimento ("Resolver + TomTicket").
+   * Fila do Markedesk de onde o chamado é, até onde o plugin sabe.
+   *
+   * Existe para a transferência não repetir o que já aconteceu: depois de uma
+   * troca de fila, a mensagem automática da fila nova pode chegar ANTES do
+   * evento de transferência e já abrir o chamado novo — o evento, ao chegar,
+   * vê que o chamado já é desta fila e não abre outro.
+   */
+  filaId?: string;
+  /**
+   * O chamado foi finalizado — pelo botão "Finalizar Chamado" (junto com o
+   * Resolver) ou pela transferência do atendimento.
    *
    * Depois disso o vínculo não recebe mais nada: responder num chamado
-   * finalizado o reabriria. Uma mensagem do cliente com o ticket reaberto é
-   * atendimento novo, e abre outro chamado.
+   * finalizado o reabriria.
    */
   finalizado?: boolean;
+  /**
+   * Por que foi finalizado. Decide quem abre o chamado seguinte: depois de
+   * resolvido, só o cliente voltando a escrever (o que chega com o ticket
+   * fechado — despedida, avaliação — pertence ao que acabou); depois de
+   * transferido, qualquer mensagem, porque o atendimento continua.
+   */
+  finalizadoPor?: MotivoDaFinalizacao;
+  /** Áudios já transcritos no chamado (wid), para não repetir a transcrição. */
+  transcritos?: string[];
 }
 
 /** Texto de abertura quando o atendimento começa pelo nosso lado. */
 const ABERTURA_PELA_EMPRESA = "Atendimento iniciado pela empresa no Markedesk.";
 
-/** Assunto de todo chamado aberto pelo plugin. */
-const ASSUNTO = "Chamado Recebido (Origem: Markedesk)";
+/** Quantos áudios transcritos lembrar por chamado — o bastante para um atendimento. */
+const MAXIMO_TRANSCRITOS = 50;
+
+/** Pedido de finalização do chamado de um ticket. */
+interface DadosDaFinalizacao {
+  ticketId: number | string;
+  /** Quem finaliza (usuário do Markedesk) — o chamado sai no nome dele. */
+  userId?: number | string | null;
+  comResumo: boolean;
+  resumo?: string | null;
+  /** Padrão: "resolvido". */
+  motivo?: MotivoDaFinalizacao;
+}
 
 function chaveDoVinculo(ticketId: number | string): string {
   return `ticket:${ticketId}`;
@@ -191,7 +228,7 @@ export class FluxoChamados {
         customer_id_type: "E",
         department_id: destino.departamentoId,
         category_id: destino.categoriaId,
-        subject: ASSUNTO,
+        subject: assuntoDoChamado(ticket.id),
         message: mensagemInicial,
         // O id do ticket gravado no chamado é o que permite achar um a partir
         // do outro fora do plugin — no TomTicket e no fluxo do n8n.
@@ -210,6 +247,7 @@ export class FluxoChamados {
         chamadoId: criado.id,
         protocolo: criado.protocolo,
         departamentoId: destino.departamentoId,
+        filaId: ticket?.queueId != null ? String(ticket.queueId) : undefined,
         clienteEmail: email
       };
       await this.gravarVinculo(ticket.id, vinculo);
@@ -279,17 +317,24 @@ export class FluxoChamados {
   /**
    * O ticket mudou de fila.
    *
-   * A primeira fila (o ticket saiu de "sem fila") apenas TRANSFERE o chamado
-   * que já existe: é o mesmo atendimento chegando ao setor certo. Uma troca
-   * posterior abre um chamado NOVO no setor de destino, porque aí o atendimento
-   * anterior já aconteceu e o histórico dele pertence ao setor que atendeu.
+   * A primeira fila (o ticket saiu de "sem fila", pelo menu do bot) apenas
+   * TRANSFERE o chamado que já existe: é o mesmo atendimento chegando ao setor
+   * certo. Uma troca posterior FINALIZA o chamado e abre um NOVO no setor de
+   * destino: o atendimento anterior já aconteceu, e o histórico dele pertence
+   * ao setor que atendeu.
+   *
+   * Quem transfere pela tela já chega aqui com o chamado finalizado — o botão
+   * do plugin finaliza ANTES de a transferência sair, com o resumo da IA (que
+   * precisa do login de quem clicou; ver BOTAO_FINALIZAR). Finalizar aqui é a
+   * rede para o resto (fluxo, bot, API, tela sem o botão carregado): sai sem
+   * resumo, mas o chamado não fica pendurado.
    */
   aoTransferir(dados: any): Promise<void> {
     return this.emSequencia(dados?.ticket?.id, () => this.transferir(dados));
   }
 
   private async transferir(dados: any): Promise<void> {
-    const { ticket, oldQueueId, newQueueId, newUserId, companyId } = dados;
+    const { ticket, oldQueueId, newQueueId, oldUserId, newUserId, companyId } = dados;
     if (!newQueueId) return;
 
     const config = await this.config(companyId);
@@ -306,9 +351,28 @@ export class FluxoChamados {
     // Quando ela chegar, `aoMensagem` lê o `queueId` que o ticket já tem
     // (inclusive este) e abre direto no setor certo — nada a fazer aqui.
     const vinculo = await this.lerVinculo(ticket.id);
-    if (!vinculo || vinculo.finalizado) return;
+    if (!vinculo) return;
+
+    // Uma mensagem da fila nova chegou antes deste evento e já abriu o
+    // chamado dela (ver VinculoChamado.filaId).
+    if (vinculo.filaId && vinculo.filaId === String(newQueueId)) return;
 
     const operadorId = this.responsavel(config, newUserId);
+    const novoChamado = (anterior: VinculoChamado) =>
+      this.abrirChamado(
+        api,
+        config,
+        { ...ticket, queueId: newQueueId, userId: newUserId ?? ticket?.userId },
+        destino,
+        `Atendimento transferido de setor no Markedesk (chamado anterior: ${anterior.protocolo || anterior.chamadoId}).`
+      );
+
+    if (vinculo.finalizado) {
+      // Finalizado pela tela, na hora de transferir: o atendimento segue no
+      // setor novo. Finalizado por ter sido RESOLVIDO: não há o que continuar.
+      if (vinculo.finalizadoPor === "transferencia" && ticket?.status !== "closed") await novoChamado(vinculo);
+      return;
+    }
 
     // Primeira fila: o chamado só muda de lugar.
     if (!oldQueueId) {
@@ -316,6 +380,7 @@ export class FluxoChamados {
         await this.transferirComAtendente(api, ticket.id, vinculo, destino.departamentoId, operadorId);
         vinculo.departamentoId = destino.departamentoId;
         vinculo.departamentoPendente = undefined;
+        vinculo.filaId = String(newQueueId);
         await this.gravarVinculo(ticket.id, vinculo);
       } catch (err: any) {
         // Não conseguiu mover agora — provavelmente ainda sem atendente.
@@ -329,15 +394,19 @@ export class FluxoChamados {
       return;
     }
 
-    // Troca de setor depois de já ter sido atendido: chamado novo. O
-    // abrirChamado já vincula o responsável.
-    await this.abrirChamado(
-      api,
-      config,
-      { ...ticket, userId: newUserId ?? ticket?.userId },
-      destino,
-      `Atendimento transferido de setor no Markedesk (chamado anterior: ${vinculo.protocolo || vinculo.chamadoId}).`
-    );
+    // Troca de fila sem ter passado pela tela: finaliza aqui mesmo, sem
+    // resumo, em nome de quem estava atendendo. Falhar não segura o chamado
+    // novo — o atendimento já está no outro setor.
+    try {
+      await this.finalizarAgora({ ticketId: ticket.id, userId: oldUserId, comResumo: false, motivo: "transferencia" });
+    } catch (err: any) {
+      console.error(
+        `${LOG} chamado ${vinculo.protocolo || vinculo.chamadoId} não pôde ser finalizado na transferência do ticket ${ticket.id}: ${err?.message || err}`
+      );
+    }
+
+    // O abrirChamado já vincula o responsável.
+    await novoChamado(vinculo);
   }
 
   /** O ticket foi aceito: o chamado ganha o atendente correspondente. */
@@ -513,7 +582,10 @@ export class FluxoChamados {
       // a nota do cliente) pertence ao atendimento que acabou — e responder
       // reabriria o chamado. Cliente escrevendo com o ticket reaberto é
       // atendimento novo: o vínculo antigo é deixado de lado e abre-se outro.
-      if (autor !== "cliente" || ticket?.status === "closed") return;
+      // Depois de uma TRANSFERÊNCIA o atendimento continua, então qualquer
+      // mensagem (o atendente novo pode falar primeiro) abre o chamado seguinte.
+      if (ticket?.status === "closed") return;
+      if (autor !== "cliente" && vinculo.finalizadoPor !== "transferencia") return;
       vinculo = null;
     }
     if (!vinculo) {
@@ -628,11 +700,55 @@ export class FluxoChamados {
     }
   }
 
-  /** O chamado do ticket, para o botão "Resolver + TomTicket" saber se aparece. */
-  async consultar(ticketId: number | string): Promise<{ protocolo?: string; finalizado: boolean } | null> {
+  /** O chamado do ticket, para o botão "Finalizar Chamado" saber se está disponível. */
+  async consultar(
+    ticketId: number | string
+  ): Promise<{ protocolo?: string; finalizado: boolean; finalizadoPor?: MotivoDaFinalizacao } | null> {
     const vinculo = await this.lerVinculo(ticketId);
     if (!vinculo) return null;
-    return { protocolo: vinculo.protocolo || vinculo.chamadoId, finalizado: !!vinculo.finalizado };
+    return {
+      protocolo: vinculo.protocolo || vinculo.chamadoId,
+      finalizado: !!vinculo.finalizado,
+      finalizadoPor: vinculo.finalizadoPor
+    };
+  }
+
+  /**
+   * A transcrição de um áudio, feita pelo "Transcrever" do Markedesk, vai para
+   * o chamado como comentário interno.
+   *
+   * Comentário, e não resposta: o texto não foi escrito por ninguém do
+   * atendimento — é a IA lendo o áudio — e resposta de atendente ainda iria
+   * por email ao cliente. O áudio original já está no chamado como anexo.
+   *
+   * O backend não avisa os plugins quando transcreve; quem traz o texto é o
+   * botão do plugin, que enxerga a resposta da tela (ver BOTAO_FINALIZAR).
+   */
+  transcricao(dados: { ticketId: number | string; wid?: string; texto?: unknown }): Promise<void> {
+    return this.emSequencia(dados.ticketId, () => this.registrarTranscricao(dados));
+  }
+
+  private async registrarTranscricao(dados: { ticketId: number | string; wid?: string; texto?: unknown }): Promise<void> {
+    const texto = transcricaoValida(dados.texto);
+    if (!texto) return;
+
+    const api = await this.api();
+    if (!api) return;
+
+    const vinculo = await this.lerVinculo(dados.ticketId);
+    // Chamado finalizado não recebe mais nada (ver VinculoChamado.finalizado).
+    if (!vinculo || vinculo.finalizado) return;
+
+    const wid = dados.wid ? String(dados.wid) : undefined;
+    if (wid && vinculo.transcritos?.includes(wid)) return;
+
+    await this.emEnvios(textoDaTranscricao(texto), null, parte => api.comentarChamado(vinculo.chamadoId, parte));
+
+    if (wid) {
+      vinculo.transcritos = [...(vinculo.transcritos || []), wid].slice(-MAXIMO_TRANSCRITOS);
+      await this.gravarVinculo(dados.ticketId, vinculo);
+    }
+    console.log(`${LOG} transcrição de áudio registrada no chamado ${vinculo.protocolo || vinculo.chamadoId} (ticket ${dados.ticketId})`);
   }
 
   /**
@@ -644,12 +760,7 @@ export class FluxoChamados {
    * junto. Lança quando não dá para finalizar: quem chamou (a tela) precisa
    * saber, para não resolver o atendimento como se tudo tivesse dado certo.
    */
-  finalizar(dados: {
-    ticketId: number | string;
-    userId?: number | string | null;
-    comResumo: boolean;
-    resumo?: string | null;
-  }): Promise<{ protocolo?: string; assunto?: string }> {
+  finalizar(dados: DadosDaFinalizacao): Promise<{ protocolo?: string; assunto?: string }> {
     let saida: { protocolo?: string; assunto?: string } = {};
     let falha: unknown;
 
@@ -667,12 +778,8 @@ export class FluxoChamados {
     });
   }
 
-  private async finalizarAgora(dados: {
-    ticketId: number | string;
-    userId?: number | string | null;
-    comResumo: boolean;
-    resumo?: string | null;
-  }): Promise<{ protocolo?: string; assunto?: string }> {
+  private async finalizarAgora(dados: DadosDaFinalizacao): Promise<{ protocolo?: string; assunto?: string }> {
+    const motivo = dados.motivo || "resolvido";
     const config = await this.config();
     const api = await this.api();
     if (!api) throw new Error("token do TomTicket não configurado");
@@ -686,7 +793,7 @@ export class FluxoChamados {
     if (quem) await this.garantirAtendente(api, dados.ticketId, vinculo, quem);
 
     const assunto = extrairAssunto(dados.resumo);
-    const partes = emPartes(textoDeFinalizacao({ assunto, resumo: dados.resumo, comResumo: dados.comResumo }));
+    const partes = emPartes(textoDeFinalizacao({ assunto, resumo: dados.resumo, comResumo: dados.comResumo, motivo }));
 
     // Texto longo: as primeiras partes como respostas, a última finaliza.
     for (const parte of partes.slice(0, -1)) await api.responderComoAtendente(vinculo.chamadoId, parte);
@@ -694,9 +801,10 @@ export class FluxoChamados {
     await api.finalizarChamado(vinculo.chamadoId, partes[partes.length - 1], minutos);
 
     vinculo.finalizado = true;
+    vinculo.finalizadoPor = motivo;
     await this.gravarVinculo(dados.ticketId, vinculo);
     console.log(
-      `${LOG} chamado ${vinculo.protocolo || vinculo.chamadoId} finalizado pelo ticket ${dados.ticketId}${assunto ? ` (assunto: ${assunto})` : ""}${dados.comResumo ? " com resumo" : ""}${minutos ? `, ${minutos} min` : ""}`
+      `${LOG} chamado ${vinculo.protocolo || vinculo.chamadoId} finalizado pelo ticket ${dados.ticketId}${motivo === "transferencia" ? " na transferência" : ""}${assunto ? ` (assunto: ${assunto})` : ""}${dados.comResumo && dados.resumo ? " com resumo" : ""}${minutos ? `, ${minutos} min` : ""}`
     );
     return { protocolo: vinculo.protocolo, assunto };
   }

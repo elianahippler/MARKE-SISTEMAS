@@ -5,7 +5,7 @@
  * atendimento, e depender do site do TomTicket para desenhá-lo traria uma
  * requisição externa a cada tela (e um ícone quebrado se o endereço mudar).
  *
- * Só serve onde o PLUGIN desenha (o botão "Resolver + TomTicket"): o ícone do
+ * Só serve onde o PLUGIN desenha (o botão "Finalizar Chamado"): o ícone do
  * card do plugin no Markedesk é escolhido numa lista fechada de símbolos, sem
  * suporte a imagem — lá vai o "Chat" na cor do TomTicket (ver metadata.ts).
  */
@@ -13,3 +13,10 @@ export const LOGO_TOMTICKET = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAACA
 
 /** Cor da marca (theme-color do site do TomTicket). */
 export const COR_TOMTICKET = "#F76045";
+
+/**
+ * Contorno e fundo do botão "Finalizar Chamado": a cor da marca suavizada.
+ * Com a cor cheia, o botão disputaria atenção com o "Resolver" do lado.
+ */
+export const BORDA_TOMTICKET = "rgba(247, 96, 69, 0.55)";
+export const FUNDO_TOMTICKET = "rgba(247, 96, 69, 0.06)";

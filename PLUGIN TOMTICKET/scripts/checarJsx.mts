@@ -8,14 +8,14 @@
 import Babel from "@babel/standalone";
 import { TELA_DE_CATEGORIAS } from "../src/ui/telaDeCategorias.ts";
 import { TELA_DE_ATENDENTES, TELA_DE_FILAS } from "../src/ui/telaDeDePara.ts";
-import { BOTAO_RESOLVER, TELA_DE_IA } from "../src/ui/resolverTomTicket.ts";
+import { BOTAO_FINALIZAR, TELA_DE_IA } from "../src/ui/resolverTomTicket.ts";
 import { TELA_DE_DIAGNOSTICO } from "../src/ui/telaDeDiagnostico.ts";
 
 const TELAS: Array<[string, string]> = [
   ["telaDeCategorias", TELA_DE_CATEGORIAS],
   ["telaDeAtendentes", TELA_DE_ATENDENTES],
   ["telaDeFilas", TELA_DE_FILAS],
-  ["botaoResolver", BOTAO_RESOLVER],
+  ["botaoFinalizar", BOTAO_FINALIZAR],
   ["telaDeIa", TELA_DE_IA],
   ["telaDeDiagnostico", TELA_DE_DIAGNOSTICO]
 ];
