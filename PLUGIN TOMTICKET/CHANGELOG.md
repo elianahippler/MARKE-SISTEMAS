@@ -11,6 +11,76 @@ As versões publicadas estão em
 
 ---
 
+## 0.4.1 — correção da 0.4.0: confirmar sem depender do evento (06/10/2026)
+
+**A 0.4.0 quebrou em produção.** As respostas chegavam no WhatsApp e NÃO
+chegavam no chamado — o contrário do bug que ela corrigia, e pior: antes
+sobrava resposta, agora faltava.
+
+**Causa.** Os hooks de um plugin são registrados no backend a partir do
+`metadata` quando o plugin é CARREGADO. A 0.4.0 adicionou
+`message:ackChanged` e `message:failed` ao metadata, mas o backend de quem já
+tinha o plugin instalado seguia com a lista antiga: esses eventos nunca
+chegavam. Toda resposta entrava na fila, nada confirmava, tudo expirava em 90 s
+e era descartado.
+
+**Correção.** A confirmação não depende mais do evento. A cada 10 s o plugin
+confere o ack REAL no backend, por `client.listMessages` — que é API do plugin,
+não assinatura de evento, e funciona desde o primeiro minuto. O
+`message:ackChanged` continua como caminho rápido para quando chegar.
+
+O chamado passa a ficar alguns segundos atrás da conversa. É o preço de ter
+certeza, e era isso que se pediu.
+
+**A lição:** correção de bug não pode depender de uma assinatura nova entrar em
+vigor. O que conserta tem que funcionar com o que já está no ar.
+
+4 testes novos (95 no total), um deles reproduzindo exatamente a falha: com
+`listMessages` devolvendo `ack 1` e NENHUM evento de ack, a resposta tem que
+sair da fila e ir ao chamado.
+
+## 0.4.0 — a resposta só entra no chamado depois que sai no WhatsApp (06/10/2026)
+
+**O bug.** O chamado registrava respostas que o cliente nunca recebeu. O evento
+`ticket:messageSent` dispara quando o Markedesk **grava** a mensagem, não
+quando o WhatsApp a aceita — e entre os dois ela pode ficar presa em `ack 0` ou
+voltar como `ack -1`. O plugin espelhava na hora do evento. O atendente via o
+balão vermelho na conversa; no chamado, a resposta estava lá, como se tivesse
+sido dada.
+
+**A correção.** A resposta do atendente agora espera a confirmação do canal.
+O critério é `ack >= 1` — o servidor do WhatsApp aceitou, o um tique da tela.
+Exigir 2 (entregue no aparelho) travaria o chamado toda vez que o cliente
+estivesse com o celular desligado: a mensagem saiu, e é isso que o chamado
+precisa registrar. A escala completa está em `src/ack.ts`.
+
+O que **não** espera, e por quê:
+
+- **mensagem do cliente** — já chegou, não há o que confirmar;
+- **nota interna** — não vai ao WhatsApp, logo nunca ganharia ack;
+- **ack já confirmado no evento** — enfileirar seria atrasar à toa;
+- **sem id de mensagem** — sem id não há como casar o ack depois; espelha na
+  hora, porque registrar sem confirmação é menos ruim que a resposta sumir.
+
+**A fila fica no banco** (tabela `pendentes`, migração 4), não em memória: um
+restart no meio da espera perderia a mensagem, e ninguém veria falta — o
+atendente a vê entregue no Markedesk.
+
+**A ordem é preservada.** O WhatsApp confirma fora de ordem, e o chamado é uma
+conversa: se a segunda resposta tem o ack antes da primeira, ela espera. Sai
+tudo junto, na ordem em que foi escrito.
+
+**O que não sai fica registrado.** Falha (`message:failed` ou `ack -1`) e
+espera vencida (90 s, o mesmo prazo que o frontend usa para pintar o balão de
+vermelho) saem da fila **sem** ir ao chamado, com erro no log — visível na aba
+Diagnóstico. O chamado passa a ser coerente com a conversa: o que o cliente não
+recebeu não aparece como dito.
+
+Eventos novos: `message:ackChanged` e `message:failed`.
+
+39 testes novos (91 no total), conferidos por mutação: revertendo a espera,
+quebrando a ordem ou tratando nota interna como mensagem normal, a suíte falha.
+
 ## 0.3.1 — desempenho do banco (06/10/2026)
 
 Nenhuma mudança de comportamento: as mesmas respostas, mais rápido. Medido com

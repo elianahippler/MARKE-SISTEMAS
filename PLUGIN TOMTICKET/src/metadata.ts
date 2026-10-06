@@ -23,7 +23,7 @@ export const metadata = definePlugin({
   // o logo de verdade aparece no botão "Finalizar Chamado".
   color: "#F76045",
   icon: "Chat",
-  version: "0.3.1",
+  version: "0.4.1",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 
@@ -196,7 +196,11 @@ export const metadata = definePlugin({
       { event: HOOK_EVENTS.ticket.TRANSFERRED },
       { event: HOOK_EVENTS.ticket.ASSIGNED },
       { event: HOOK_EVENTS.ticket.MESSAGE_RECEIVED },
-      { event: HOOK_EVENTS.ticket.MESSAGE_SENT }
+      { event: HOOK_EVENTS.ticket.MESSAGE_SENT },
+      // A resposta do atendente só vai ao chamado depois que o WhatsApp
+      // confirma o envio — sem estes dois, ela nunca sairia da fila.
+      { event: HOOK_EVENTS.message.ACK_CHANGED },
+      { event: HOOK_EVENTS.message.FAILED }
     ],
 
     routes: true

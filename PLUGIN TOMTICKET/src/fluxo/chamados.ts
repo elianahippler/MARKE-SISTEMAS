@@ -23,6 +23,8 @@ import {
   type ConfiguracaoTomTicket
 } from "@/config/settings";
 import { autorDaMensagem, baixarAnexo, corpoDaMensagem, emPartes, resumo, type Autor } from "@/fluxo/mensagem";
+import { RepositorioPendentes } from "@/db/pendentes";
+import { confirmaEnvio, falhouNoEnvio, ESPERA_PELO_ACK_MS, IDADE_PARA_CONFERIR_MS } from "@/ack";
 import {
   assuntoDoChamado,
   extrairAssunto,
@@ -72,7 +74,8 @@ export class FluxoChamados {
    */
   constructor(
     private readonly server: PluginServer,
-    private readonly vinculos: RepositorioVinculos
+    private readonly vinculos: RepositorioVinculos,
+    private readonly pendentes: RepositorioPendentes
   ) {}
 
   private emSequencia(ticketId: number | string, tarefa: () => Promise<void>): Promise<void> {
@@ -463,8 +466,183 @@ export class FluxoChamados {
    * senão o chamado vira um monólogo e quem o ler depois não sabe quem falou
    * o quê.
    */
+  /**
+   * Chegou mensagem no atendimento.
+   *
+   * A do CLIENTE já chegou — não há o que confirmar, espelha direto. A do
+   * ATENDENTE pode ainda não ter saído do WhatsApp: o evento do Markedesk
+   * dispara na gravação, não na confirmação do canal. Ver `aguardarAck`.
+   */
   aoMensagem(dados: any, doEvento: "cliente" | "atendente"): Promise<void> {
+    if (doEvento === "atendente" && this.aguardarAck(dados)) return Promise.resolve();
     return this.emSequencia(dados?.ticket?.id, () => this.mensagem(dados, doEvento));
+  }
+
+  /**
+   * A resposta do atendente deve esperar a confirmação do WhatsApp?
+   *
+   * `true` = foi enfileirada e não se espelha agora. Os casos em que NÃO se
+   * espera:
+   *
+   * - **Nota interna.** Não vai para o WhatsApp, logo nunca ganha ack.
+   *   Esperar por um ack que não vem a deixaria presa até expirar e sumir.
+   * - **Ack já confirmado.** O evento às vezes chega com o envio já aceito;
+   *   enfileirar seria atrasar o chamado sem motivo.
+   * - **Sem id de mensagem.** Sem o id não há como casar o ack depois. Nesse
+   *   caso espelha na hora: é o comportamento antigo, e perder a resposta no
+   *   chamado é pior que registrá-la sem confirmação.
+   */
+  private aguardarAck(dados: any): boolean {
+    const mensagem = dados?.message;
+    const id = mensagem?.id;
+
+    if (!mensagem || id === undefined || id === null) return false;
+    if (mensagem.isPrivate) return false;
+    if (confirmaEnvio(mensagem.ack)) return false;
+
+    if (falhouNoEnvio(mensagem.ack)) {
+      console.error(
+        `${LOG} mensagem ${id} do ticket ${dados?.ticket?.id} falhou no envio (ack -1) — NÃO foi espelhada no chamado.`
+      );
+      return true;
+    }
+
+    try {
+      this.pendentes.enfileirar(id, dados?.ticket?.id, dados);
+      return true;
+    } catch (err: any) {
+      // Sem conseguir enfileirar, o comportamento antigo é o menos ruim:
+      // registrar sem confirmação é melhor que a resposta sumir do chamado.
+      console.error(
+        `${LOG} não consegui enfileirar a mensagem ${id} para esperar o ack (${err?.message || err}) — espelhando sem confirmação.`
+      );
+      return false;
+    }
+  }
+
+  /**
+   * O WhatsApp mudou o ack de uma mensagem (`message:ackChanged`).
+   *
+   * Confirmado o envio, a resposta que estava esperando vai para o chamado.
+   * Falhou, sai da fila sem ir — e com log, porque uma resposta que não chegou
+   * ao cliente é coisa que alguém precisa ver.
+   */
+  aoAck(dados: any): Promise<void> {
+    const id = dados?.message?.id;
+    const ticketId = dados?.ticket?.id ?? dados?.message?.ticketId;
+    if (id === undefined || id === null) return Promise.resolve();
+
+    if (falhouNoEnvio(dados?.ack)) return this.descartar(id, ticketId, "o canal reportou falha (ack -1)");
+    if (!confirmaEnvio(dados?.ack)) return Promise.resolve();
+    if (!this.pendentes.ler(id)) return Promise.resolve(); // não era desta fila
+
+    this.pendentes.confirmar(id);
+    return this.emSequencia(ticketId, () => this.liberarDoTicket(ticketId));
+  }
+
+  /** O envio falhou de vez (`message:failed`). */
+  aoFalhaDeEnvio(dados: any): Promise<void> {
+    const id = dados?.message?.id;
+    if (id === undefined || id === null) return Promise.resolve();
+    return this.descartar(id, dados?.ticket?.id, dados?.erro || "falha no envio");
+  }
+
+  private async descartar(id: any, ticketId: any, motivo: string): Promise<void> {
+    if (!this.pendentes.ler(id)) return;
+    this.pendentes.remover(id);
+    console.error(
+      `${LOG} mensagem ${id} do ticket ${ticketId} não saiu no WhatsApp (${motivo}) — NÃO foi espelhada no chamado.`
+    );
+  }
+
+  /**
+   * Espelha as respostas já confirmadas do ticket, na ordem em que foram
+   * escritas, parando na primeira que ainda espera.
+   *
+   * Parar é o ponto: o chamado é uma conversa, e o WhatsApp confirma fora de
+   * ordem. Espelhar a segunda porque o ack dela chegou antes inverteria as
+   * frases para quem lê o chamado depois.
+   */
+  private async liberarDoTicket(ticketId: any): Promise<void> {
+    for (const pendente of this.pendentes.doTicket(ticketId)) {
+      // O ack do payload guardado é o do momento do envio, e já estava
+      // desatualizado quando foi gravado — o que vale é a coluna, escrita
+      // quando a confirmação chegou.
+      if (!pendente.confirmada) return;
+
+      // Remove ANTES de espelhar: se o TomTicket falhar, o fluxo já registra o
+      // erro, e manter a linha faria a próxima confirmação do ticket tentar de
+      // novo — a mesma resposta duas vezes no chamado.
+      this.pendentes.remover(pendente.mensagemId);
+      await this.mensagem(pendente.dados, "atendente");
+    }
+  }
+
+  /**
+   * Confere no backend o ack real das respostas que estão esperando.
+   *
+   * ## Por que não basta o evento
+   *
+   * A 0.4.0 confiava só em `message:ackChanged`. Os hooks de um plugin são
+   * registrados no backend a partir do `metadata` quando ele é CARREGADO — um
+   * container novo com eventos novos no metadata não os recebe enquanto o
+   * backend não reler isso. Resultado em produção: nenhuma confirmação chegava,
+   * tudo expirava em 90 s, e as respostas sumiam do chamado enquanto chegavam
+   * normalmente no WhatsApp.
+   *
+   * `listMessages` é a API do plugin, não uma assinatura de evento: funciona
+   * desde o primeiro minuto, sem depender de registro nenhum. O evento continua
+   * valendo como caminho rápido — quando chega, a resposta sai na hora; quando
+   * não chega, esta conferência resolve em segundos.
+   *
+   * Lição que ficou: correção de bug não pode depender de uma assinatura nova
+   * entrar em vigor.
+   */
+  async verificarPendentes(): Promise<void> {
+    const esperando = this.pendentes.expiradas(IDADE_PARA_CONFERIR_MS);
+    if (!esperando.length) return;
+
+    const porTicket = new Map<string, typeof esperando>();
+    for (const p of esperando) {
+      const lista = porTicket.get(p.ticketId) || [];
+      lista.push(p);
+      porTicket.set(p.ticketId, lista);
+    }
+
+    for (const [ticketId, lista] of porTicket) {
+      let mensagens: any[] = [];
+      try {
+        mensagens = (await this.server.client?.listMessages(Number(ticketId), 50)) || [];
+      } catch (err: any) {
+        // Backend fora do ar: não decide nada agora. A resposta continua na
+        // fila e a próxima volta tenta de novo — descartar aqui perderia uma
+        // mensagem que provavelmente saiu.
+        console.warn(`${LOG} não consegui conferir o ack do ticket ${ticketId}: ${err?.message || err}`);
+        continue;
+      }
+
+      const porId = new Map(mensagens.map((m: any) => [String(m?.id), m]));
+      for (const pendente of lista) {
+        const real = porId.get(String(pendente.mensagemId));
+        const idadeMs = Date.now() - new Date(pendente.quando).getTime();
+
+        if (real && confirmaEnvio(real.ack)) {
+          this.pendentes.confirmar(pendente.mensagemId);
+        } else if (real && falhouNoEnvio(real.ack)) {
+          await this.descartar(pendente.mensagemId, ticketId, "o canal reportou falha (ack -1)");
+        } else if (idadeMs >= ESPERA_PELO_ACK_MS) {
+          // Passou do prazo e o ack continua 0 (ou a mensagem sumiu do
+          // backend). É o mesmo critério do balão vermelho na tela.
+          await this.descartar(
+            pendente.mensagemId,
+            ticketId,
+            `${Math.round(ESPERA_PELO_ACK_MS / 1000)}s sem confirmação do WhatsApp`
+          );
+        }
+      }
+
+      await this.emSequencia(ticketId, () => this.liberarDoTicket(ticketId));
+    }
   }
 
   private async mensagem(dados: any, doEvento: "cliente" | "atendente"): Promise<void> {

@@ -5,6 +5,17 @@ import { TomTicketApi } from "@/tomticket/api";
 import { FluxoChamados } from "@/fluxo/chamados";
 import { capturarLogs, lerDiagnostico, usarBanco } from "@/diagnostico";
 import { abrirBanco, estatisticas, type Banco } from "@/db/banco";
+import { RepositorioPendentes } from "@/db/pendentes";
+
+/**
+ * De quanto em quanto tempo procurar respostas que o WhatsApp nunca confirmou.
+ *
+ * 10 s porque esta conferência não é só a limpeza do que expirou: é o que
+ * CONFIRMA a maioria das respostas, lendo o ack real no backend. O evento
+ * `message:ackChanged` é o caminho rápido quando chega; este é o que garante.
+ * O preço é o chamado ficar alguns segundos atrás da conversa.
+ */
+const INTERVALO_DA_VARREDURA_MS = 10_000;
 import { RepositorioVinculos } from "@/db/vinculos";
 import { importarDoStorage } from "@/db/importar";
 import {
@@ -54,6 +65,8 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
    */
   let banco: Banco | null = null;
   let vinculos: RepositorioVinculos | null = null;
+  let pendentes: RepositorioPendentes | null = null;
+  let varredura: NodeJS.Timeout | null = null;
 
   const server: PluginServer = new PluginServer({
     metadata,
@@ -91,6 +104,12 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
           return fluxo.aoMensagem(data, "cliente");
         case HOOK_EVENTS.ticket.MESSAGE_SENT:
           return fluxo.aoMensagem(data, "atendente");
+        // O WhatsApp confirmou (ou não) o envio: é o que libera a resposta do
+        // atendente para o chamado. Ver src/ack.ts.
+        case HOOK_EVENTS.message.ACK_CHANGED:
+          return fluxo.aoAck(data);
+        case HOOK_EVENTS.message.FAILED:
+          return fluxo.aoFalhaDeEnvio(data);
       }
     },
 
@@ -377,7 +396,23 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
     usarBanco(banco);
 
     vinculos = new RepositorioVinculos(banco);
-    fluxo = new FluxoChamados(server, vinculos);
+    pendentes = new RepositorioPendentes(banco);
+    fluxo = new FluxoChamados(server, vinculos, pendentes);
+
+    /*
+     * Respostas que ficaram esperando o ack quando o processo caiu.
+     *
+     * Varrer no boot, e não só no intervalo, porque o ack que elas esperavam
+     * chegou (ou não) enquanto o plugin estava fora: ninguém mais vai avisar.
+     * Depois, de tempos em tempos, para as que expiram com o plugin no ar.
+     */
+    void fluxo.verificarPendentes();
+    varredura = setInterval(() => {
+      fluxo?.verificarPendentes().catch((err: any) => {
+        console.error(`${LOG} falha ao conferir as mensagens sem confirmação: ${err?.message || err}`);
+      });
+    }, INTERVALO_DA_VARREDURA_MS);
+    varredura.unref?.();
 
     /**
      * A importação é best-effort: se o backend estiver fora, o marco não é

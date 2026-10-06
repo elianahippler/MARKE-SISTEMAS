@@ -194,6 +194,42 @@ const MIGRACOES: string[] = [
    * motivo: as linhas de chamado são a minoria.
    */
   CREATE INDEX idx_eventos_chamado ON eventos (id DESC) WHERE eh_chamado = 1;
+  `,
+
+  // ── 4: respostas esperando o ack do WhatsApp ─────────────────────
+  `
+  /*
+   * A resposta do atendente que ainda não teve o envio confirmado.
+   *
+   * O evento do Markedesk dispara quando a mensagem é GRAVADA, não quando o
+   * WhatsApp a aceita — e entre os dois ela pode ficar presa ou falhar. Até a
+   * 0.3.1 o plugin espelhava na hora do evento, e o chamado registrava
+   * resposta que o cliente nunca recebeu. Agora ela espera aqui.
+   *
+   * No banco, e não numa fila em memória, porque um restart no meio da espera
+   * perderia a mensagem: ela não iria para o chamado nunca, e ninguém veria
+   * falta — o atendente a vê no Markedesk, entregue.
+   *
+   * A coluna dados guarda o payload do hook em JSON. O evento inteiro, e não os
+   * campos picados, porque quem espelha depois é a MESMA função que espelharia
+   * na hora: ela recebe o payload e não precisa saber que passou por aqui.
+   */
+  CREATE TABLE pendentes (
+    mensagem_id TEXT PRIMARY KEY,
+    ticket_id   TEXT NOT NULL,
+    quando      TEXT NOT NULL,
+    dados       TEXT NOT NULL,
+    /* O ack chegou e confirmou o envio. Coluna, e não um Set em memória,
+       porque um restart entre a confirmação e o espelhamento perderia a
+       marca: a resposta já teria saído no WhatsApp e nunca entraria no
+       chamado. */
+    confirmada  INTEGER NOT NULL DEFAULT 0
+  );
+
+  /* A ordem importa: o chamado é uma conversa. Ver "doTicket". */
+  CREATE INDEX idx_pendentes_ticket ON pendentes (ticket_id, quando);
+  /* A varredura do que passou do tempo de espera. */
+  CREATE INDEX idx_pendentes_quando ON pendentes (quando);
   `
 ];
 
