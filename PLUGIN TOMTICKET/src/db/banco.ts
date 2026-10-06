@@ -52,14 +52,17 @@ import { LOG } from "@/identidade";
  * não há escritor concorrente dentro dele.
  */
 
+/** Uma consulta já compilada. Ver `preparado`, que as reaproveita. */
+export interface Statement {
+  run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
+  get(...params: unknown[]): any;
+  all(...params: unknown[]): any[];
+}
+
 /** O handle do banco, no formato que os repositórios usam. */
 export interface Banco {
   exec(sql: string): void;
-  prepare(sql: string): {
-    run(...params: unknown[]): { changes: number | bigint; lastInsertRowid: number | bigint };
-    get(...params: unknown[]): any;
-    all(...params: unknown[]): any[];
-  };
+  prepare(sql: string): Statement;
   close(): void;
 }
 
@@ -162,6 +165,35 @@ const MIGRACOES: string[] = [
   ALTER TABLE vinculos ADD COLUMN categoria_id TEXT;
   ALTER TABLE vinculos ADD COLUMN mensagem     TEXT;
   ALTER TABLE vinculos ADD COLUMN canal        TEXT;
+  `,
+
+  // ── 3: índices que faltavam (medidos com EXPLAIN QUERY PLAN) ─────
+  `
+  /*
+   * A busca da tela é "protocolo = ? OR chamado_id = ?", porque a pessoa tanto
+   * cita o número quanto cola o hash. Só o protocolo tinha índice — e um OR em
+   * que um lado não é indexado não permite a união de índices: o SQLite
+   * desistia dos dois e varria a tabela (SCAN vinculos). Com os dois indexados
+   * ele faz duas buscas e junta.
+   */
+  CREATE INDEX idx_vinculos_chamado ON vinculos (chamado_id);
+
+  /*
+   * "Os que estão abertos, mais recentes primeiro" é a consulta da tela e a
+   * mais frequente. Índice parcial: só as linhas abertas entram, e já na ordem
+   * da listagem — o SQLite lê as 50 primeiras e para, em vez de percorrer o
+   * histórico inteiro em busca das que sobraram abertas. Parcial também o
+   * mantém pequeno: vínculo finalizado, que é a maioria com o tempo, não ocupa
+   * espaço nele.
+   */
+  CREATE INDEX idx_vinculos_abertos ON vinculos (criado_em DESC) WHERE finalizado = 0;
+
+  /*
+   * A aba Diagnóstico conta as linhas "de chamado" a cada abertura, e isso
+   * varria a tabela de eventos inteira (até 5.000 linhas). Parcial pelo mesmo
+   * motivo: as linhas de chamado são a minoria.
+   */
+  CREATE INDEX idx_eventos_chamado ON eventos (id DESC) WHERE eh_chamado = 1;
   `
 ];
 
@@ -272,6 +304,38 @@ export function abrirBanco(caminho = caminhoDoBanco()): Banco {
   return banco;
 }
 
+/**
+ * Statements já compilados, por banco.
+ *
+ * `prepare()` não é barato: medido nesta base, compilar
+ * `SELECT * FROM vinculos WHERE ticket_id = ?` custa 17,7 µs contra 10,2 µs
+ * do `get()` em si — ou seja, 61% do tempo de uma leitura era recompilar o
+ * mesmo SQL. E essa leitura acontece em TODA mensagem de TODO atendimento.
+ *
+ * `WeakMap` para o cache morrer junto com o banco (os testes abrem um por
+ * caso), e `Map` por texto de SQL porque as consultas do plugin são um
+ * conjunto fixo e pequeno — não há risco de crescer sem limite.
+ *
+ * O statement guarda o SQL compilado, não resultado: nada fica obsoleto. Em
+ * mudança de schema o próprio SQLite recompila sozinho, e as migrações rodam
+ * dentro do `abrirBanco`, antes de qualquer repositório existir.
+ */
+const statements = new WeakMap<Banco, Map<string, Statement>>();
+
+export function preparado(banco: Banco, sql: string): Statement {
+  let doBanco = statements.get(banco);
+  if (!doBanco) {
+    doBanco = new Map();
+    statements.set(banco, doBanco);
+  }
+  let statement = doBanco.get(sql);
+  if (!statement) {
+    statement = banco.prepare(sql);
+    doBanco.set(sql, statement);
+  }
+  return statement;
+}
+
 /** O que a aba Diagnóstico mostra sobre o próprio banco. */
 export function estatisticas(banco: Banco): {
   caminho: string;
@@ -281,14 +345,14 @@ export function estatisticas(banco: Banco): {
   eventos: number;
   tamanhoBytes: number;
 } {
-  const umNumero = (sql: string): number => Number(banco.prepare(sql).get()?.n ?? 0);
+  const umNumero = (sql: string): number => Number(preparado(banco, sql).get()?.n ?? 0);
 
   return {
     // O caminho REALMENTE aberto, não o padrão: a aba Diagnóstico mostra isto,
     // e exibir um caminho que não é o em uso engana justamente quem está
     // tentando descobrir onde o banco foi parar.
     caminho: caminhoAberto.get(banco) || caminhoDoBanco(),
-    versaoSchema: Number(banco.prepare("PRAGMA user_version").get()?.user_version ?? 0),
+    versaoSchema: Number(preparado(banco, "PRAGMA user_version").get()?.user_version ?? 0),
     vinculos: umNumero("SELECT COUNT(*) AS n FROM vinculos"),
     abertos: umNumero("SELECT COUNT(*) AS n FROM vinculos WHERE finalizado = 0"),
     eventos: umNumero("SELECT COUNT(*) AS n FROM eventos"),

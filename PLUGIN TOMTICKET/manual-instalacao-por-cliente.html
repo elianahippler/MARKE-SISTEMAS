@@ -152,7 +152,7 @@
 
 services:
   plugin:
-    image: marke-plugin-tomticket:0.3.0
+    image: marke-plugin-tomticket:0.3.1
     container_name: markedesk-tomticket-&lt;cliente&gt;
     restart: unless-stopped
     mem_limit: 512m
@@ -212,16 +212,22 @@ volumes:
 
 <p class="passo"><b class="n">14°</b> Procurar a linha que começa com <b>banco aberto em</b>. Ela deve mostrar:</p>
 
-<pre>[TomTicket] banco aberto em /app/data/tomticket.db (schema v2)</pre>
+<pre>[TomTicket] banco aberto em /app/data/tomticket.db (schema v3)</pre>
 
 <div class="nota">
-<b>Observação:</b> essa linha é a confirmação de que o banco está no volume certo. Aparecendo <b>qualquer outro caminho</b>, voltar ao passo 8° e conferir o <b>PLUGIN_WORKSPACE</b>.
+<b>Observação:</b> o que se confere aqui é o <b>caminho</b>: ele tem de ser exatamente <b>/app/data/tomticket.db</b>. O número do schema no fim muda a cada versão do plugin e não indica problema.
 </div>
 
-<p class="passo"><b class="n">15°</b> Logo abaixo, conferir que a contagem de vínculos está em zero (cliente novo começa sem nenhum).</p>
+<div class="nota atencao">
+<b>Atenção:</b> aparecendo <b>qualquer outro caminho</b>, o banco está fora do volume e será perdido na próxima atualização. Voltar ao passo 8° e conferir o <b>PLUGIN_WORKSPACE</b>.
+</div>
+
+<p class="passo"><b class="n">15°</b> Logo abaixo, conferir que a linha seguinte é:</p>
+
+<pre>[TomTicket] nada a importar do PluginStorage — banco começa vazio</pre>
 
 <div class="nota atencao">
-<b>Atenção:</b> aparecendo vínculos em um cliente recém-instalado, o volume está sendo dividido com outro cliente. Parar a instalação e conferir o nome do volume no passo 7°.
+<b>Atenção:</b> em um cliente recém-instalado o banco tem de começar vazio. Trazendo vínculos de atendimentos que não são desse cliente, o volume está sendo dividido com outro. Parar a instalação e conferir o nome do volume no passo 7°.
 </div>
 
 <h2>Ligar o plugin ao Markedesk do cliente</h2>
@@ -240,7 +246,7 @@ volumes:
 <p><b>Caso os atendimentos de dois clientes apareçam misturados:</b> conferir, nas duas stacks, se o nome do volume é diferente, repetindo os passos 7° ao 15°. Se continuar, entrar em contato com o <b>Suporte Marke</b> e enviar o print dos <b>Logs</b> dos dois containers.</p>
 </div>
 
-<p class="rodape">Plugin TomTicket · versão 0.3.0 · Marke Sistemas</p>
+<p class="rodape">Plugin TomTicket · versão 0.3.1 · Marke Sistemas</p>
 
 </body>
 </html>

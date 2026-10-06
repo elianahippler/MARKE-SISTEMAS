@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { abrirBanco, migrar, estatisticas, type Banco } from "@/db/banco";
+import { abrirBanco, migrar, estatisticas, preparado, type Banco } from "@/db/banco";
 
 /**
  * Os testes abrem o banco com `abrirBanco(":memory:")`.
@@ -102,5 +102,64 @@ describe("o caminho reportado", () => {
     // foi aberto em outro lugar mandaria quem depura procurar o arquivo errado
     // — e no modo multi-tenant apontaria todas as empresas para o mesmo.
     expect(estatisticas(banco).caminho).toBe(":memory:");
+  });
+});
+
+describe("preparado (cache de statements)", () => {
+  it("devolve o MESMO statement para o mesmo SQL", () => {
+    // É o ponto do cache: compilar o SQL custava 61% do tempo de uma leitura,
+    // e essa leitura acontece em toda mensagem de todo atendimento.
+    const sql = "SELECT * FROM vinculos WHERE ticket_id = ?";
+    expect(preparado(banco, sql)).toBe(preparado(banco, sql));
+  });
+
+  it("statements diferentes para SQL diferente", () => {
+    expect(preparado(banco, "SELECT 1 AS a")).not.toBe(preparado(banco, "SELECT 2 AS a"));
+  });
+
+  it("o statement reaproveitado continua respondendo certo", () => {
+    // Reusar um statement entre chamadas só é seguro se ele resetar sozinho;
+    // se não resetasse, a segunda chamada viria vazia.
+    banco.prepare("INSERT INTO vinculos (ticket_id, chamado_id, cliente_email, criado_em, atualizado_em) VALUES (?, ?, ?, ?, ?)")
+      .run("1", "c1", "a@b.c", "2026-01-01", "2026-01-01");
+    const sql = "SELECT chamado_id FROM vinculos WHERE ticket_id = ?";
+    expect(preparado(banco, sql).get("1").chamado_id).toBe("c1");
+    expect(preparado(banco, sql).get("1").chamado_id).toBe("c1");
+    expect(preparado(banco, sql).get("999")).toBeUndefined();
+  });
+
+  it("o cache de um banco não vaza para outro", () => {
+    const outro = abrirBanco(":memory:");
+    try {
+      expect(preparado(banco, "SELECT 1 AS a")).not.toBe(preparado(outro, "SELECT 1 AS a"));
+    } finally {
+      outro.close();
+    }
+  });
+});
+
+describe("índices (migração 3)", () => {
+  const plano = (sql: string, ...params: unknown[]): string =>
+    banco.prepare("EXPLAIN QUERY PLAN " + sql).all(...params).map((l: any) => l.detail).join(" | ");
+
+  it("a busca por protocolo OU hash usa índice nos dois lados", () => {
+    // Com índice só no protocolo, o OR não permitia união de índices e o
+    // SQLite varria a tabela inteira (SCAN vinculos) — 834 µs contra 39 µs.
+    const detalhe = plano(
+      "SELECT * FROM vinculos WHERE (protocolo = ? OR chamado_id = ?) ORDER BY criado_em DESC LIMIT 50",
+      "x", "x"
+    );
+    expect(detalhe).toContain("idx_vinculos_protocolo");
+    expect(detalhe).toContain("idx_vinculos_chamado");
+    expect(detalhe).not.toContain("SCAN vinculos (");
+  });
+
+  it("a listagem de abertos usa o índice parcial", () => {
+    expect(plano("SELECT * FROM vinculos WHERE finalizado = 0 ORDER BY criado_em DESC LIMIT 50"))
+      .toContain("idx_vinculos_abertos");
+  });
+
+  it("a contagem de linhas de chamado não varre a tabela de eventos", () => {
+    expect(plano("SELECT COUNT(*) FROM eventos WHERE eh_chamado = 1")).toContain("idx_eventos_chamado");
   });
 });

@@ -1,4 +1,4 @@
-import type { Banco } from "@/db/banco";
+import { preparado, type Banco } from "@/db/banco";
 
 /**
  * O repositório do diagnóstico — as linhas de log do plugin.
@@ -68,8 +68,7 @@ export class RepositorioEventos {
 
   /** Registra uma linha de log. */
   registrar(evento: Evento): void {
-    this.banco
-      .prepare("INSERT INTO eventos (quando, nivel, texto, eh_chamado) VALUES (?, ?, ?, ?)")
+    preparado(this.banco, "INSERT INTO eventos (quando, nivel, texto, eh_chamado) VALUES (?, ?, ?, ?)")
       .run(evento.quando, evento.nivel, evento.texto, ehDeChamado(evento.texto) ? 1 : 0);
 
     if (++this.desdeAPoda >= PODAR_A_CADA) {
@@ -93,7 +92,7 @@ export class RepositorioEventos {
 
   /** A contagem de cada aba, sobre a tabela inteira. */
   contagens(): { problemas: number; chamados: number; tudo: number } {
-    const n = (sql: string) => Number(this.banco.prepare(sql).get()?.n ?? 0);
+    const n = (sql: string) => Number(preparado(this.banco, sql).get()?.n ?? 0);
     return {
       problemas: n("SELECT COUNT(*) AS n FROM eventos WHERE nivel <> 'info'"),
       chamados: n("SELECT COUNT(*) AS n FROM eventos WHERE eh_chamado = 1"),
@@ -112,8 +111,7 @@ export class RepositorioEventos {
 
     const teto = Math.min(Math.max(Number(limite) || 300, 1), 1000);
 
-    return this.banco
-      .prepare(`SELECT quando, nivel, texto FROM eventos ${onde} ORDER BY id DESC LIMIT ?`)
+    return preparado(this.banco, `SELECT quando, nivel, texto FROM eventos ${onde} ORDER BY id DESC LIMIT ?`)
       .all(teto)
       .map(linha => ({
         quando: String(linha.quando),
@@ -132,9 +130,8 @@ export class RepositorioEventos {
   podar(): number {
     const corte = new Date(Date.now() - DIAS_DE_RETENCAO * 86_400_000).toISOString();
 
-    const porIdade = this.banco.prepare("DELETE FROM eventos WHERE quando < ?").run(corte);
-    const porQuantidade = this.banco
-      .prepare(
+    const porIdade = preparado(this.banco, "DELETE FROM eventos WHERE quando < ?").run(corte);
+    const porQuantidade = preparado(this.banco, 
         `DELETE FROM eventos WHERE id NOT IN (
            SELECT id FROM eventos ORDER BY id DESC LIMIT ?
          )`

@@ -1,4 +1,4 @@
-import type { Banco } from "@/db/banco";
+import { preparado, type Banco } from "@/db/banco";
 import type { MotivoDaFinalizacao } from "@/fluxo/finalizacao";
 
 /**
@@ -135,8 +135,7 @@ export class RepositorioVinculos {
 
   /** O vínculo do ticket, ou `null` se ele nunca virou chamado. */
   ler(ticketId: number | string): VinculoRegistrado | null {
-    const linha = this.banco
-      .prepare("SELECT * FROM vinculos WHERE ticket_id = ?")
+    const linha = preparado(this.banco, "SELECT * FROM vinculos WHERE ticket_id = ?")
       .get(String(ticketId));
     return linha ? daLinha(linha) : null;
   }
@@ -156,8 +155,7 @@ export class RepositorioVinculos {
   gravar(ticketId: number | string, vinculo: VinculoChamado): void {
     const agora = new Date().toISOString();
 
-    this.banco
-      .prepare(
+    preparado(this.banco, 
         `INSERT INTO vinculos (
            ticket_id, chamado_id, protocolo, departamento_id, departamento_pendente,
            operador_atual, cliente_email, fila_id, finalizado, finalizado_por,
@@ -225,16 +223,14 @@ export class RepositorioVinculos {
     // descuido e travar o navegador de quem abriu o Diagnóstico.
     const limite = Math.min(Math.max(Number(filtro.limite) || 50, 1), 500);
 
-    return this.banco
-      .prepare(`SELECT * FROM vinculos ${onde} ORDER BY criado_em DESC LIMIT ?`)
+    return preparado(this.banco, `SELECT * FROM vinculos ${onde} ORDER BY criado_em DESC LIMIT ?`)
       .all(...params, limite)
       .map(daLinha);
   }
 
   /** Este áudio já foi transcrito neste chamado? */
   jaTranscrito(ticketId: number | string, wid: string): boolean {
-    const linha = this.banco
-      .prepare("SELECT 1 AS existe FROM transcricoes WHERE ticket_id = ? AND wid = ?")
+    const linha = preparado(this.banco, "SELECT 1 AS existe FROM transcricoes WHERE ticket_id = ? AND wid = ?")
       .get(String(ticketId), wid);
     return !!linha;
   }
@@ -248,8 +244,7 @@ export class RepositorioVinculos {
    * tratar.
    */
   marcarTranscrito(ticketId: number | string, wid: string): void {
-    this.banco
-      .prepare("INSERT OR IGNORE INTO transcricoes (ticket_id, wid, quando) VALUES (?, ?, ?)")
+    preparado(this.banco, "INSERT OR IGNORE INTO transcricoes (ticket_id, wid, quando) VALUES (?, ?, ?)")
       .run(String(ticketId), wid, new Date().toISOString());
   }
 }
