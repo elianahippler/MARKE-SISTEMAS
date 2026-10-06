@@ -8,13 +8,20 @@
 # tsx do lado de dev, o `npx tsx` do CMD tentaria BAIXAR o pacote no primeiro
 # boot — falha em container sem rede para o registro.
 #
+# NODE 24 (era 20): o plugin passou a guardar o estado dele num SQLite próprio,
+# pelo módulo nativo `node:sqlite`. Ele nasceu no 22.5 atrás da flag
+# `--experimental-sqlite` e só dispensa a flag a partir do 24. A alternativa
+# seria `better-sqlite3`, que no Alpine (musl) não tem binário pronto e
+# compilaria do zero — exigindo python3, make e g++ no builder para um plugin
+# que hoje não tem uma única dependência nativa. Ver src/db/banco.ts.
+#
 # RUNTIME NODE (não Bun): padrão da casa desde que o http.request do Bun 1.2 se
 # mostrou capaz de travar sem receber resposta do backend.
 
 # ─────────────────────────────────────────────────────────────
 # Stage 1: builder
 # ─────────────────────────────────────────────────────────────
-FROM node:20-alpine AS builder
+FROM node:24-alpine AS builder
 
 WORKDIR /app
 
@@ -33,7 +40,7 @@ COPY plugins/plugin-tomticket/tsconfig.json ./plugins/plugin-tomticket/
 # ─────────────────────────────────────────────────────────────
 # Stage 2: runtime — só o que roda
 # ─────────────────────────────────────────────────────────────
-FROM node:20-alpine AS runtime
+FROM node:24-alpine AS runtime
 
 WORKDIR /app/plugins/plugin-tomticket
 

@@ -3,7 +3,10 @@ import { metadata } from "@/metadata";
 import { LOG } from "@/identidade";
 import { TomTicketApi } from "@/tomticket/api";
 import { FluxoChamados } from "@/fluxo/chamados";
-import { capturarLogs, lerDiagnostico } from "@/diagnostico";
+import { capturarLogs, lerDiagnostico, usarBanco } from "@/diagnostico";
+import { abrirBanco, estatisticas, type Banco } from "@/db/banco";
+import { RepositorioVinculos } from "@/db/vinculos";
+import { importarDoStorage } from "@/db/importar";
 import {
   clienteTomTicket,
   guardarNaMemoria,
@@ -21,6 +24,14 @@ export interface CreateInstanceOptions {
 
 export interface TomTicketInstance {
   server: PluginServer;
+  /**
+   * Abre o banco, importa o que vinha do PluginStorage e liga tudo.
+   *
+   * Separado do construtor porque abrir o banco é assíncrono e `new
+   * PluginServer` não é — e porque quem chama precisa poder decidir o que
+   * fazer se o banco não abrir (ver `index.ts`).
+   */
+  iniciar(): Promise<void>;
 }
 
 /**
@@ -33,6 +44,16 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
   // Criado depois do server (usa-o para storage e configuração), mas declarado
   // aqui para o onHook abaixo enxergá-lo pela closure.
   let fluxo: FluxoChamados;
+
+  /**
+   * O banco e o repositório, preenchidos por `iniciar()`.
+   *
+   * Na closure da instância, e não em módulo: no modo multi-tenant cada
+   * empresa tem o seu arquivo, e um handle global faria duas empresas
+   * escreverem vínculos no mesmo banco.
+   */
+  let banco: Banco | null = null;
+  let vinculos: RepositorioVinculos | null = null;
 
   const server: PluginServer = new PluginServer({
     metadata,
@@ -162,9 +183,61 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
         (await api.listarAtendentes()).map(a => ({ value: a.id, label: a.name }))
       );
 
-      /** Últimos erros, avisos e chamados — a aba Diagnóstico. */
-      router.get("/diagnostico", async (_req, res) => {
-        return res.json(await lerDiagnostico());
+      /**
+       * Últimos erros, avisos e chamados — a aba Diagnóstico.
+       *
+       * O filtro virou parâmetro porque agora é o BANCO que filtra. Antes a
+       * aba baixava 200 eventos e filtrava em memória, então "Erros e avisos
+       * (3)" contava 3 entre os 200 que vieram — não entre os que existem.
+       */
+      router.get("/diagnostico", async (req, res) => {
+        const pedido = String(req.query?.filtro || "problemas");
+        const filtro =
+          pedido === "chamados" || pedido === "tudo" || pedido === "problemas"
+            ? (pedido as "chamados" | "tudo" | "problemas")
+            : "problemas";
+
+        return res.json(await lerDiagnostico(filtro, Number(req.query?.limite) || 300));
+      });
+
+      /**
+       * Os vínculos ticket↔chamado gravados no banco.
+       *
+       * Esta rota é o motivo de o banco existir: com o PluginStorage não havia
+       * como responder "qual ticket é o chamado 74128?" nem "o que o plugin
+       * abriu hoje?" — chave-valor por `ticket:{id}` só responde o caminho de
+       * ida. Era para isso que o `webhookVinculo` mandava cada vínculo ao n8n
+       * gravar na tabela `comunica`; agora o dado está em casa.
+       *
+       * Na 0.3.0 o webhook saiu, e esta rota passou a ser o ÚNICO caminho para
+       * quem consome de fora (relatórios, fluxos do n8n): quem lia a tabela
+       * `comunica` precisa passar a ler daqui.
+       */
+      router.get("/vinculos", async (req, res) => {
+        if (!vinculos) return res.status(503).json({ erro: "banco não iniciado", vinculos: [] });
+
+        try {
+          const lista = vinculos.listar({
+            protocolo: req.query?.protocolo ? String(req.query.protocolo) : undefined,
+            ticketId: req.query?.ticketId ? String(req.query.ticketId) : undefined,
+            apenasAbertos: req.query?.abertos === "1",
+            limite: Number(req.query?.limite) || 50
+          });
+          return res.json({ vinculos: lista });
+        } catch (err: any) {
+          console.error(`${LOG} falha ao listar vínculos: ${err?.message || err}`);
+          return res.status(500).json({ erro: err?.message || String(err), vinculos: [] });
+        }
+      });
+
+      /** O estado do banco — para o rodapé da aba Diagnóstico e para o suporte. */
+      router.get("/banco", async (_req, res) => {
+        if (!banco) return res.status(503).json({ erro: "banco não iniciado" });
+        try {
+          return res.json(estatisticas(banco));
+        } catch (err: any) {
+          return res.status(500).json({ erro: err?.message || String(err) });
+        }
       });
 
       /**
@@ -282,8 +355,52 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
     }
   });
 
-  fluxo = new FluxoChamados(server);
+  // A captura de log vem ANTES de abrir o banco: o que o boot registrar fica
+  // num buffer e é drenado quando o banco abre. Sem isso, um erro de
+  // provisionamento — justamente o que alguém vai procurar no Diagnóstico —
+  // se perderia.
   capturarLogs(server);
 
-  return { server };
+  /**
+   * Abre o banco, importa o que vinha do PluginStorage e monta o fluxo.
+   *
+   * A ordem é obrigatória: o `FluxoChamados` recebe o repositório pronto, e a
+   * importação roda ANTES de qualquer hook ser atendido. Se um evento de
+   * atendimento chegasse no meio da importação, ele leria "sem vínculo" num
+   * ticket que tem chamado aberto e abriria um segundo no TomTicket.
+   *
+   * Por isso quem chama só deve dar `server.start()` depois desta promessa
+   * resolver — ver `index.ts`.
+   */
+  async function iniciar(): Promise<void> {
+    banco = abrirBanco();
+    usarBanco(banco);
+
+    vinculos = new RepositorioVinculos(banco);
+    fluxo = new FluxoChamados(server, vinculos);
+
+    /**
+     * A importação é best-effort: se o backend estiver fora, o marco não é
+     * gravado e ela tenta de novo no próximo boot.
+     *
+     * Não trava o boot porque o plugin tem trabalho que não depende dela (as
+     * telas de configuração, o teste de conexão), e porque uma
+     * indisponibilidade passageira do storage não deve deixar o plugin inteiro
+     * fora do ar. O risco assumido: um atendimento em curso que receba
+     * mensagem nessa janela abre chamado novo. É o mesmo risco que já existia
+     * quando o storage caía — e some no boot seguinte.
+     */
+    try {
+      const feito = await importarDoStorage(server, banco);
+      if (!feito.pulada && feito.vinculos === 0 && feito.eventos === 0) {
+        console.log(`${LOG} nada a importar do PluginStorage — banco começa vazio`);
+      }
+    } catch (err: any) {
+      console.error(
+        `${LOG} importação do PluginStorage falhou (será tentada no próximo boot): ${err?.message || err}`
+      );
+    }
+  }
+
+  return { server, iniciar };
 }

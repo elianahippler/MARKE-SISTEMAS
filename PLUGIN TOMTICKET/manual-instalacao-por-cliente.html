@@ -1,0 +1,246 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<title>Instalar o plugin TomTicket para mais de um cliente</title>
+<style>
+  @page { size: A4; margin: 18mm 16mm 16mm 16mm; }
+
+  :root {
+    --texto: #1a1a1a;
+    --suave: #555;
+    --linha: #d8dde3;
+    --marca: #0f5132;
+    --atencao: #8a1c1c;
+    --atencao-fundo: #fdf2f2;
+    --obs-fundo: #f4f6f8;
+  }
+
+  * { box-sizing: border-box; }
+
+  body {
+    font-family: "Segoe UI", Arial, sans-serif;
+    font-size: 10.5pt;
+    line-height: 1.55;
+    color: var(--texto);
+    margin: 0;
+  }
+
+  h1 {
+    font-size: 19pt;
+    line-height: 1.25;
+    margin: 0 0 4mm 0;
+    color: var(--marca);
+  }
+
+  h2 {
+    font-size: 12.5pt;
+    margin: 9mm 0 3mm 0;
+    padding-bottom: 1.5mm;
+    border-bottom: 1.5px solid var(--linha);
+    color: var(--marca);
+    break-after: avoid;
+  }
+
+  p { margin: 0 0 3mm 0; }
+
+  .intro { margin-bottom: 5mm; }
+
+  /* Passos: o número em negrito abre a linha, como nos manuais da base */
+  .passo { margin: 0 0 3mm 0; }
+  .passo b.n { color: var(--marca); }
+
+  ul { margin: 0 0 3mm 0; padding-left: 6mm; }
+  li { margin-bottom: 1mm; }
+
+  code {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 9.5pt;
+    background: var(--obs-fundo);
+    padding: 0.5mm 1.2mm;
+    border-radius: 2px;
+  }
+
+  pre {
+    font-family: Consolas, "Courier New", monospace;
+    font-size: 8.5pt;
+    line-height: 1.4;
+    background: var(--obs-fundo);
+    border: 1px solid var(--linha);
+    border-radius: 3px;
+    padding: 3mm 4mm;
+    margin: 0 0 4mm 0;
+    white-space: pre-wrap;
+    word-break: break-word;
+    break-inside: avoid;
+  }
+  pre.longo { break-inside: auto; }
+
+  /* Destaques: só dois, como manda o padrão */
+  .nota {
+    border-left: 3px solid var(--linha);
+    background: var(--obs-fundo);
+    padding: 2.5mm 4mm;
+    margin: 0 0 4mm 0;
+    break-inside: avoid;
+  }
+  .nota.atencao {
+    border-left-color: var(--atencao);
+    background: var(--atencao-fundo);
+  }
+  .nota b { color: var(--marca); }
+  .nota.atencao b { color: var(--atencao); }
+
+  .fecho {
+    margin-top: 8mm;
+    padding-top: 3mm;
+    border-top: 1.5px solid var(--linha);
+  }
+
+  .rodape {
+    margin-top: 6mm;
+    font-size: 8.5pt;
+    color: var(--suave);
+  }
+
+  .troca { background: #fff3cd; padding: 0.3mm 1mm; border-radius: 2px; }
+</style>
+</head>
+<body>
+
+<h1>Instalar o plugin TomTicket para mais de um cliente</h1>
+
+<div class="intro">
+<p>Para realizar a instalação de um novo cliente quando já existe outro plugin TomTicket rodando no mesmo servidor:</p>
+
+<p>Significa repetir a instalação trocando <b>quatro nomes</b> que identificam o cliente. Cada plugin guarda os vínculos entre atendimento e chamado em um banco próprio, dentro do seu volume. Repetindo os nomes de outro cliente, os dois containers passam a gravar no mesmo banco e os atendimentos se misturam.</p>
+</div>
+
+<div class="nota atencao">
+<b>Atenção:</b> um plugin atende <b>uma empresa</b>. Não apontar duas empresas do Markedesk para o mesmo plugin.
+</div>
+
+<h2>Antes de começar</h2>
+
+<p>Definir um apelido curto para o cliente, só com letras minúsculas, números e traço, sem espaço e sem acento. Exemplos: <code>padaria-sol</code>, <code>cliente-42</code>.</p>
+
+<p>Neste manual o apelido aparece como <code class="troca">&lt;cliente&gt;</code>. Onde estiver escrito assim, trocar pelo apelido definido.</p>
+
+<p>Escolher também uma <b>porta livre</b> no servidor. A primeira instalação usa a 32900; para a próxima, usar 32901, depois 32902, e assim por diante.</p>
+
+<div class="nota">
+<b>Observação:</b> a imagem (<b>marke-plugin-tomticket</b>) é criada uma única vez no servidor e serve para todos os clientes. Não é preciso refazer a Etapa 1 da instalação a cada cliente.
+</div>
+
+<h2>Criar a stack do cliente</h2>
+
+<p class="passo"><b class="n">1°</b> No menu do lado esquerdo do Portainer, clicar em <b>Stacks</b>.</p>
+
+<p class="passo"><b class="n">2°</b> Conferir na lista que ainda <b>não</b> existe nenhuma stack com o apelido do cliente. Se existir, parar e confirmar com o responsável antes de seguir.</p>
+
+<p class="passo"><b class="n">3°</b> Clicar em <b>Add stack</b> (botão no topo da lista).</p>
+
+<p class="passo"><b class="n">4°</b> No campo <b>Name</b>, digitar:</p>
+
+<pre>markedesk-tomticket-&lt;cliente&gt;</pre>
+
+<p class="passo"><b class="n">5°</b> Em <b>Build method</b>, deixar marcado <b>Web editor</b>.</p>
+
+<p class="passo"><b class="n">6°</b> Colar no editor o conteúdo abaixo, já trocando <code class="troca">&lt;cliente&gt;</code> pelo apelido e a porta <b>32900</b> pela porta escolhida:</p>
+
+<pre class="longo">version: "3.8"
+
+services:
+  plugin:
+    image: marke-plugin-tomticket:0.3.0
+    container_name: markedesk-tomticket-&lt;cliente&gt;
+    restart: unless-stopped
+    mem_limit: 512m
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:'+process.env.PORT+'/health').then(r=&gt;process.exit(r.ok?0:1),()=&gt;process.exit(1))"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    ports:
+      - "32900:3033"
+    environment:
+      PORT: "3033"
+      PUBLIC_URL: "http://45.140.192.86:32900"
+      PLUGIN_WORKSPACE: "/app/data"
+    volumes:
+      - markedesk-tomticket-&lt;cliente&gt;-data:/app/data
+    logging:
+      driver: json-file
+      options:
+        max-size: "50m"
+        max-file: "1"
+
+volumes:
+  markedesk-tomticket-&lt;cliente&gt;-data:</pre>
+
+<p class="passo"><b class="n">7°</b> Antes de prosseguir, conferir no editor que o apelido do cliente aparece em <b>quatro lugares</b>:</p>
+
+<ul>
+  <li>em <b>container_name</b></li>
+  <li>na linha do volume, dentro de <b>volumes:</b> do serviço</li>
+  <li>no fim da página, em <b>volumes:</b></li>
+  <li>no campo <b>Name</b> da stack (passo 4°)</li>
+</ul>
+
+<div class="nota atencao">
+<b>Atenção:</b> o nome do volume é o que separa um cliente do outro. Deixando o nome de outro cliente em qualquer uma das linhas, os dois gravam no mesmo banco e os atendimentos se misturam.
+</div>
+
+<p class="passo"><b class="n">8°</b> Conferir que a linha <b>PLUGIN_WORKSPACE: "/app/data"</b> está presente e escrita exatamente assim.</p>
+
+<div class="nota atencao">
+<b>Atenção:</b> sem essa linha o plugin sobe e funciona, mas grava o banco fora do volume. Nada é perdido na hora — o estrago aparece na próxima atualização do container, quando os vínculos dos atendimentos em curso somem e cada um abre um chamado novo no TomTicket.
+</div>
+
+<p class="passo"><b class="n">9°</b> Conferir que a porta da linha <b>ports</b> não está em uso por outra stack, e que o número dela é o mesmo que aparece no fim da <b>PUBLIC_URL</b>.</p>
+
+<p class="passo"><b class="n">10°</b> Conferir que a opção de puxar a imagem (<b>Re-pull image</b> ou <b>Pull latest image</b>) está desligada.</p>
+
+<p class="passo"><b class="n">11°</b> Clicar em <b>Deploy the stack</b>, no fim da página, e aguardar.</p>
+
+<h2>Conferir se separou certo</h2>
+
+<p class="passo"><b class="n">12°</b> No menu do lado esquerdo, clicar em <b>Containers</b> e localizar <b>markedesk-tomticket-&lt;cliente&gt;</b> com a situação <b>running</b>.</p>
+
+<p class="passo"><b class="n">13°</b> Clicar em <b>markedesk-tomticket-&lt;cliente&gt;</b> e depois em <b>Logs</b>.</p>
+
+<p class="passo"><b class="n">14°</b> Procurar a linha que começa com <b>banco aberto em</b>. Ela deve mostrar:</p>
+
+<pre>[TomTicket] banco aberto em /app/data/tomticket.db (schema v2)</pre>
+
+<div class="nota">
+<b>Observação:</b> essa linha é a confirmação de que o banco está no volume certo. Aparecendo <b>qualquer outro caminho</b>, voltar ao passo 8° e conferir o <b>PLUGIN_WORKSPACE</b>.
+</div>
+
+<p class="passo"><b class="n">15°</b> Logo abaixo, conferir que a contagem de vínculos está em zero (cliente novo começa sem nenhum).</p>
+
+<div class="nota atencao">
+<b>Atenção:</b> aparecendo vínculos em um cliente recém-instalado, o volume está sendo dividido com outro cliente. Parar a instalação e conferir o nome do volume no passo 7°.
+</div>
+
+<h2>Ligar o plugin ao Markedesk do cliente</h2>
+
+<p class="passo"><b class="n">16°</b> Entrar no Markedesk <b>do cliente</b> e seguir a instalação normal, informando o endereço do plugin com a porta escolhida.</p>
+
+<p class="passo"><b class="n">17°</b> Na aba <b>Conexão</b>, colar o <b>Token da API</b> do TomTicket <b>do cliente</b> e clicar em <b>Testar conexão</b>.</p>
+
+<div class="nota atencao">
+<b>Atenção:</b> cada cliente tem o seu token. Reaproveitar o token de outro cliente abre os chamados na conta errada do TomTicket.
+</div>
+
+<p class="passo"><b class="n">18°</b> Salvar e seguir com o mapeamento de filas, setores e categorias.</p>
+
+<div class="fecho">
+<p><b>Caso os atendimentos de dois clientes apareçam misturados:</b> conferir, nas duas stacks, se o nome do volume é diferente, repetindo os passos 7° ao 15°. Se continuar, entrar em contato com o <b>Suporte Marke</b> e enviar o print dos <b>Logs</b> dos dois containers.</p>
+</div>
+
+<p class="rodape">Plugin TomTicket · versão 0.3.0 · Marke Sistemas</p>
+
+</body>
+</html>

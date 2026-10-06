@@ -6,6 +6,55 @@ Cada atendimento do Markedesk vira um chamado no TomTicket, e o chamado
 acompanha o atendimento: muda de setor, ganha atendente e recebe as mensagens
 dos dois lados.
 
+## 0.2.0 — banco próprio (SQLite) (06/10/2026)
+
+O plugin passou a guardar o estado dele num **SQLite próprio**, em
+`/app/data/tomticket.db` — o mesmo volume onde já vive o `plugin-config.json`.
+Antes tudo ficava no `PluginStorage`, que é uma tabela chave-valor **dentro do
+backend do Markedesk**, alcançada por HTTP.
+
+O que isso resolve:
+
+| Antes (PluginStorage) | Agora (SQLite) |
+|---|---|
+| O vínculo ticket↔chamado dependia do backend estar no ar; o próprio código avisava que "o que se perde é o vínculo depois de um restart" | Arquivo local, no volume. Vínculo perdido só se o volume se perder — o mesmo risco que já vale para o token |
+| Não havia como consultar: chave-valor por `ticket:{id}` só responde o caminho de ida | `GET /vinculos` lista, filtra por protocolo e por abertos — era isso que o webhook do n8n ia buscar fora, e que na 0.3.0 deixou de existir |
+| Diagnóstico: array de 200 eventos reescrito INTEIRO a cada rajada de log, com espera de 5 s para agrupar gravações | Append-only, teto de 5.000, poda por idade e quantidade, filtro e contagem no servidor |
+| A aba contava "Erros e avisos (3)" entre os 200 baixados — não entre os que existem | A contagem vem de `COUNT(*)` |
+| Transcrições de áudio: array no vínculo com teto de 50 | Tabela própria, sem teto |
+
+**Migração automática.** No primeiro boot o plugin importa os vínculos e o
+diagnóstico que estavam no PluginStorage, e grava uma marca para não repetir.
+Isso não é conforto: sem a importação, todo atendimento em curso ficaria órfão e
+abriria um **segundo** chamado no TomTicket na próxima mensagem — o cliente com
+dois protocolos para o mesmo assunto, e o estrago aparecendo horas depois.
+Nada é apagado do PluginStorage: voltar para a 0.1.11 continua possível.
+
+**O webhook do n8n saiu (0.3.0).** O plugin não posta mais em
+`comunica/grava`, e o campo "Webhook do n8n" sumiu da aba Conexão. Os três
+campos que só existiam naquele POST — categoria, mensagem e canal — viraram
+colunas do vínculo, e `GET /vinculos` é agora o único caminho para quem
+consome de fora.
+
+> **Atenção, quem lê a tabela `comunica`:** ela para de receber linhas novas a
+> partir desta versão. O que já está lá continua lá (nada foi apagado), mas
+> relatórios e fluxos que dependem dela precisam passar a ler `GET /vinculos`.
+> O webhook `comunica/consulta`, do mesmo workflow, nunca foi chamado pelo
+> plugin — se alguém o usa, continua funcionando sobre os dados antigos.
+
+**Exige Node 24.** O banco usa o módulo nativo `node:sqlite`, que só dispensa
+a flag `--experimental-sqlite` a partir do 24 — a imagem subiu de
+`node:20-alpine` para `node:24-alpine`. A alternativa, `better-sqlite3`,
+compilaria do zero no Alpine (musl) e exigiria python3, make e g++ no build,
+para um plugin que não tem uma única dependência nativa. **Zero dependências
+novas.**
+
+Novas rotas: `GET /vinculos` (lista, com `?protocolo=`, `?ticketId=`,
+`?abertos=1`, `?limite=`) e `GET /banco` (estado do banco). O rodapé da aba
+Diagnóstico mostra quantos vínculos existem, quantos em aberto e o tamanho do
+arquivo — a primeira coisa a conferir quando "o plugin perdeu os chamados": zero
+vínculos logo depois de um deploy significa volume não montado.
+
 ## 0.1.11 — botão mais alto (01/10/2026)
 
 O botão "Finalizar Chamado" ocupa a altura da barra do cabeçalho: 36px de
@@ -143,7 +192,7 @@ plugin. O atendente Bot é escolhido na mesma aba. O formato salvo não mudou.
 
 **Texto sem corte:** a API aceitou 20.000 caracteres inteiros, apesar dos 512 da
 documentação. Acima disso, a mensagem vai em partes numeradas. Só o resumo
-enviado ao webhook do n8n continua em 512.
+gravado na coluna `mensagem` do vínculo continua em 512.
 
 **PDF recebido sem arquivo não é do TomTicket.** O plugin do canal HardAPI
 entrega o documento ao Markedesk sem conteúdo quando o download no WhatsApp
@@ -300,32 +349,40 @@ anterior.
 Na prática o critério é `oldQueueId`: ausente = primeira fila (transfere),
 presente = troca (chamado novo).
 
-### O vínculo no banco (n8n)
+### O vínculo no banco
 
-O plugin guarda o vínculo ticket→chamado no PluginStorage para uso próprio. Além
-disso, a cada chamado aberto ele posta no webhook do n8n configurado na aba
-**Conexão**, que insere a linha na tabela `comunica`:
+O plugin guarda o vínculo ticket→chamado no **banco próprio** (SQLite — ver
+`src/db/`), e é só ali. Uma linha da tabela `vinculos`:
 
-```json
-{
-  "markedesk": "1234",
-  "tomticket": "c40ff726…",
-  "protocolo": "74037",
-  "email": "cliente@exemplo.com",
-  "tipo": "E",
-  "departamento": "a82e10d1…",
-  "categoria": "e50a11e1…",
-  "mensagem": "…",
-  "quem": "whatsapp"
-}
-```
+| Coluna | O que é |
+|---|---|
+| `ticket_id` | o atendimento no Markedesk (chave primária) |
+| `chamado_id`, `protocolo` | o chamado no TomTicket — id interno e o número que a pessoa cita |
+| `departamento_id`, `departamento_pendente` | setor onde está, e para onde ainda não deu para mover |
+| `categoria_id` | categoria escolhida pelo de-para da fila |
+| `operador_atual` | atendente vinculado agora |
+| `cliente_email` | email com que o cliente foi identificado |
+| `fila_id` | fila do Markedesk |
+| `mensagem` | começo da primeira mensagem (512 caracteres), como referência |
+| `canal` | de onde veio: whatsapp, instagram… |
+| `finalizado`, `finalizado_por` | se encerrou e por quê |
+| `criado_em`, `atualizado_em` | quando abriu e quando mudou pela última vez |
 
-O banco existe para o que está **fora** do plugin — fluxos do n8n e relatórios
-que precisam ligar um ticket a um chamado. Por isso a gravação é best-effort:
-falhar ali não interrompe o atendimento, que já está de pé. Campo vazio na
-configuração desliga a gravação.
+Quem consome de fora usa `GET /vinculos`, que filtra por protocolo, por ticket
+e por abertos.
 
-Workflow que recebe: **Plugin TomTicket - grava vinculo** (`hZgMml6NAICFRgzM`).
+**Até a 0.2.0 isso era dividido com o n8n.** A cada chamado aberto o plugin
+postava num webhook que inseria a linha na tabela `comunica`, no Postgres —
+porque o PluginStorage não respondia consulta nenhuma. Na 0.3.0 o webhook saiu:
+as três informações que só existiam naquele POST (`categoria`, `mensagem`,
+`quem`) viraram as colunas `categoria_id`, `mensagem` e `canal`, pela migração
+2 do banco.
+
+A tabela `comunica` **para de receber linhas novas** a partir desta versão. Nada
+foi apagado dela, e o workflow **Comunica - banco do plugin TomTicket**
+continua no n8n com as duas pontas (`comunica/grava` e `comunica/consulta`) —
+o plugin é que não chama mais nenhuma. Quem lia aquela tabela para ligar ticket
+a chamado precisa migrar para `GET /vinculos`.
 
 ### Comportamentos da API do TomTicket confirmados ao vivo (30/09/2026)
 
@@ -487,6 +544,10 @@ Se o plugin for entrar no repositório de vez, o lugar dele é
 | `src/config/settings.ts` | configuração por empresa (memória + PluginStorage) e resolvedores do de-para |
 | `src/fluxo/chamados.ts` | o espelhamento do atendimento no chamado (o coração do plugin) |
 | `src/diagnostico.ts` | captura dos logs do plugin para a aba Diagnóstico |
+| `src/db/banco.ts` | abre o SQLite, aplica as migrações versionadas e reporta o estado |
+| `src/db/vinculos.ts` | repositório dos vínculos ticket↔chamado e das transcrições |
+| `src/db/eventos.ts` | repositório do diagnóstico (append-only, com poda) |
+| `src/db/importar.ts` | traz do PluginStorage o que existia antes da 0.2.0, uma vez só |
 | `src/ui/telaDeDiagnostico.ts` | a aba Diagnóstico |
 | `src/ui/logoTomTicket.ts` | ícone oficial do TomTicket, embutido |
 | `src/fluxo/finalizacao.ts` | assunto principal lido do resumo e texto de finalização do chamado |

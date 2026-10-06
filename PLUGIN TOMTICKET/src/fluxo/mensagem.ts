@@ -17,7 +17,7 @@ export type Autor = "cliente" | "atendente" | "bot";
  */
 const LIMITE_MENSAGEM = 20_000;
 
-/** O resumo gravado no banco pelo webhook do n8n — ali o texto é só referência. */
+/** O resumo gravado na coluna `mensagem` do vínculo — ali o texto é só referência. */
 const LIMITE_RESUMO = 512;
 
 /**
@@ -37,7 +37,7 @@ const ORIGENS_AUTOMATICAS = new Set(["bot", "system", "flow", "campaign", "sched
  */
 const LIMITE_ANEXO = 24 * 1024 * 1024;
 
-/** Texto curto para o banco (tabela `comunica`), com reticência quando cortado. */
+/** Texto curto para a coluna `mensagem` do vínculo, com reticência quando cortado. */
 export function resumo(texto: string): string {
   if (texto.length <= LIMITE_RESUMO) return texto;
   return `${texto.slice(0, LIMITE_RESUMO - 3)}...`;

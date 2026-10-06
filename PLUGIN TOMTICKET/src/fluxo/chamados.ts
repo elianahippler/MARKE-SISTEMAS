@@ -32,69 +32,11 @@ import {
   transcricaoValida,
   type MotivoDaFinalizacao
 } from "@/fluxo/finalizacao";
+import { RepositorioVinculos, type VinculoChamado } from "@/db/vinculos";
 
-/** O que guardamos sobre o chamado de um ticket. */
-interface VinculoChamado {
-  chamadoId: string;
-  /** Número que a pessoa vê e cita no TomTicket (o id é um hash). */
-  protocolo?: string;
-  /** Setor onde o chamado está DE FATO no TomTicket agora. */
-  departamentoId?: string;
-  /**
-   * Setor para onde o chamado deveria ir, mas ainda não foi possível mover.
-   *
-   * Existe porque o TomTicket recusa transferir (mudar de setor) um chamado
-   * sem atendente vinculado — confirmado ao vivo em 30/09/2026: falha com
-   * "not possible to transfer tickets without attendants" mesmo só mudando
-   * `department_id`, em chamado recém-criado. Com o atendente Bot configurado
-   * o chamado já nasce com alguém vinculado e isto quase não acontece; sem
-   * ele, guardamos o destino aqui e completamos a mudança quando `aoAtribuir`
-   * finalmente vincular alguém.
-   */
-  departamentoPendente?: string;
-  /**
-   * Atendente vinculado ao chamado agora, até onde o plugin sabe.
-   *
-   * A resposta de atendente sai em nome de quem estiver vinculado — então
-   * antes de cada uma o vínculo precisa ser o do autor (Bot ou a pessoa). Saber
-   * quem já está poupa a troca (duas chamadas à API) quando o autor se repete.
-   */
-  operadorAtual?: string;
-  /** Email com que o cliente foi identificado no TomTicket. */
-  clienteEmail: string;
-  /**
-   * Fila do Markedesk de onde o chamado é, até onde o plugin sabe.
-   *
-   * Existe para a transferência não repetir o que já aconteceu: depois de uma
-   * troca de fila, a mensagem automática da fila nova pode chegar ANTES do
-   * evento de transferência e já abrir o chamado novo — o evento, ao chegar,
-   * vê que o chamado já é desta fila e não abre outro.
-   */
-  filaId?: string;
-  /**
-   * O chamado foi finalizado — pelo botão "Finalizar Chamado" (junto com o
-   * Resolver) ou pela transferência do atendimento.
-   *
-   * Depois disso o vínculo não recebe mais nada: responder num chamado
-   * finalizado o reabriria.
-   */
-  finalizado?: boolean;
-  /**
-   * Por que foi finalizado. Decide quem abre o chamado seguinte: depois de
-   * resolvido, só o cliente voltando a escrever (o que chega com o ticket
-   * fechado — despedida, avaliação — pertence ao que acabou); depois de
-   * transferido, qualquer mensagem, porque o atendimento continua.
-   */
-  finalizadoPor?: MotivoDaFinalizacao;
-  /** Áudios já transcritos no chamado (wid), para não repetir a transcrição. */
-  transcritos?: string[];
-}
 
 /** Texto de abertura quando o atendimento começa pelo nosso lado. */
 const ABERTURA_PELA_EMPRESA = "Atendimento iniciado pela empresa no Markedesk.";
-
-/** Quantos áudios transcritos lembrar por chamado — o bastante para um atendimento. */
-const MAXIMO_TRANSCRITOS = 50;
 
 /** Pedido de finalização do chamado de um ticket. */
 interface DadosDaFinalizacao {
@@ -107,20 +49,8 @@ interface DadosDaFinalizacao {
   motivo?: MotivoDaFinalizacao;
 }
 
-function chaveDoVinculo(ticketId: number | string): string {
-  return `ticket:${ticketId}`;
-}
 
 export class FluxoChamados {
-  /**
-   * Cache dos vínculos, à frente do PluginStorage.
-   *
-   * O storage é a persistência (sobrevive a restart), mas ele vive no backend:
-   * uma indisponibilidade dele órfãos todas as mensagens seguintes de um
-   * atendimento em curso, porque não se acharia mais o chamado. Além disso cada
-   * mensagem faria uma ida ao backend só para descobrir um id que não muda.
-   */
-  private readonly cache = new Map<string, VinculoChamado>();
 
   /**
    * A última tarefa de cada ticket — os eventos de um ticket rodam em fila.
@@ -132,7 +62,18 @@ export class FluxoChamados {
    */
   private readonly filas = new Map<string, Promise<void>>();
 
-  constructor(private readonly server: PluginServer) {}
+  /**
+   * O repositório é injetado, não criado aqui.
+   *
+   * Quem abre o banco é a instância do plugin (`tomticketInstance`), porque a
+   * abertura é assíncrona e acontece uma vez no boot — um fluxo que abrisse o
+   * seu próprio teria de lidar com "o banco já está pronto?" em cada método, e
+   * o modo multi-tenant terminaria com dois handles para o mesmo arquivo.
+   */
+  constructor(
+    private readonly server: PluginServer,
+    private readonly vinculos: RepositorioVinculos
+  ) {}
 
   private emSequencia(ticketId: number | string, tarefa: () => Promise<void>): Promise<void> {
     const chave = String(ticketId);
@@ -157,36 +98,53 @@ export class FluxoChamados {
     return clienteTomTicket(this.server, companyId);
   }
 
+  /**
+   * O vínculo do ticket, do banco do plugin.
+   *
+   * Sem cache em memória, e isso é uma SIMPLIFICAÇÃO que o banco permitiu: o
+   * cache existia porque cada leitura era uma ida HTTP ao backend, e porque
+   * uma indisponibilidade dele orfanava o atendimento em curso. Lendo de um
+   * SQLite local as duas razões desaparecem — a consulta é por chave primária
+   * em arquivo local, mais rápida que o `Map` depois de somar o custo de
+   * manter os dois em sincronia.
+   *
+   * Continua `async` porque os ~15 pontos de chamada estão em funções `async`
+   * e usam `await`; tirar a promessa aqui seria uma mudança de assinatura sem
+   * ganho nenhum.
+   */
   private async lerVinculo(ticketId: number | string): Promise<VinculoChamado | null> {
-    const chave = chaveDoVinculo(ticketId);
-    const emCache = this.cache.get(chave);
-    if (emCache) return emCache;
-
     try {
-      const doStorage = await this.server.client?.storage.get<VinculoChamado>(chave);
-      if (doStorage) this.cache.set(chave, doStorage);
-      return doStorage || null;
-    } catch {
+      return this.vinculos.ler(ticketId);
+    } catch (err: any) {
+      console.error(`${LOG} falha ao ler o vínculo do ticket ${ticketId}: ${err?.message || err}`);
       return null;
     }
   }
 
+  /**
+   * Grava o vínculo no banco do plugin.
+   *
+   * O erro aqui é alto porque a consequência é cara: sem o vínculo gravado o
+   * chamado existe no TomTicket mas fica órfão, e a próxima mensagem do
+   * atendimento abre um chamado NOVO — o cliente termina com dois protocolos
+   * para o mesmo assunto.
+   *
+   * Antes, uma falha de gravação ainda deixava o atendimento em curso andar
+   * pelo cache em memória, e o que se perdia era o vínculo depois de um
+   * restart. Agora não há meio-caminho: se o SQLite local recusar a escrita,
+   * é disco cheio ou arquivo corrompido — nenhum dos dois melhora com um
+   * cache por cima, e seguir em memória esconderia o problema até o restart.
+   */
   private async gravarVinculo(
     ticketId: number | string,
     vinculo: VinculoChamado
   ): Promise<void> {
-    const chave = chaveDoVinculo(ticketId);
-    this.cache.set(chave, vinculo);
-
     try {
-      await this.server.client?.storage.set(chave, vinculo);
+      this.vinculos.gravar(ticketId, vinculo);
     } catch (err: any) {
-      // Sem o vínculo gravado o chamado existe mas fica órfão: as mensagens
-      // seguintes não sabem onde entrar. Vale um log alto.
-      // O cache acima segura o atendimento em curso; o que se perde é o
-      // vínculo depois de um restart do plugin.
       console.error(
-        `${LOG} vínculo do ticket ${ticketId} não foi persistido (segue em memória): ${err?.message || err}`
+        `${LOG} vínculo do ticket ${ticketId} NÃO foi gravado no banco — o chamado ` +
+          `${vinculo.protocolo || vinculo.chamadoId} pode ficar órfão: ${err?.message || err}`
       );
     }
   }
@@ -248,7 +206,13 @@ export class FluxoChamados {
         protocolo: criado.protocolo,
         departamentoId: destino.departamentoId,
         filaId: ticket?.queueId != null ? String(ticket.queueId) : undefined,
-        clienteEmail: email
+        clienteEmail: email,
+        // Até a 0.2.0 estes três só iam para o n8n gravar na tabela `comunica`.
+        // Com o webhook fora, são colunas do vínculo: o destino completo, uma
+        // referência do assunto e o canal de origem.
+        categoriaId: destino.categoriaId,
+        mensagem: resumo(mensagemInicial),
+        canal: ticket?.channel || "markedesk"
       };
       await this.gravarVinculo(ticket.id, vinculo);
       console.log(
@@ -261,56 +225,10 @@ export class FluxoChamados {
       const responsavel = this.responsavel(config, ticket?.userId);
       if (responsavel) await this.garantirAtendente(api, ticket.id, vinculo, responsavel);
 
-      await this.registrarNoBanco(config, ticket, vinculo, destino, mensagemInicial);
       return vinculo;
     } catch (err: any) {
       console.error(`${LOG} falha ao criar chamado do ticket ${ticket?.id}: ${err?.message || err}`);
       return null;
-    }
-  }
-
-  /**
-   * Grava o vínculo na tabela `comunica`, pelo webhook do n8n.
-   *
-   * O plugin já guarda o vínculo no PluginStorage para o próprio uso; o banco
-   * existe para o que está FORA dele — fluxos do n8n e relatórios que precisam
-   * ligar um ticket a um chamado. Por isso a falha aqui não interrompe nada:
-   * o atendimento e o chamado já estão de pé.
-   */
-  private async registrarNoBanco(
-    config: ConfiguracaoTomTicket,
-    ticket: any,
-    vinculo: VinculoChamado,
-    destino: { departamentoId: string; categoriaId?: string },
-    mensagem: string
-  ): Promise<void> {
-    if (!config.webhookVinculo) return;
-
-    try {
-      const res = await fetch(config.webhookVinculo, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          markedesk: String(ticket.id),
-          tomticket: vinculo.chamadoId,
-          // `null`, e não "": a coluna ID da tabela é numérica, e string vazia
-          // faz o insert falhar em vez de gravar a linha sem protocolo.
-          protocolo: vinculo.protocolo ? Number(vinculo.protocolo) : null,
-          email: vinculo.clienteEmail,
-          tipo: "E",
-          departamento: destino.departamentoId,
-          categoria: destino.categoriaId || "",
-          mensagem: resumo(mensagem),
-          quem: ticket?.channel || "markedesk"
-        }),
-        signal: AbortSignal.timeout(10_000)
-      });
-
-      if (!res.ok) {
-        console.error(`${LOG} webhook do vínculo respondeu HTTP ${res.status} (ticket ${ticket.id})`);
-      }
-    } catch (err: any) {
-      console.error(`${LOG} falha ao gravar o vínculo no banco: ${err?.message || err}`);
     }
   }
 
@@ -740,14 +658,14 @@ export class FluxoChamados {
     if (!vinculo || vinculo.finalizado) return;
 
     const wid = dados.wid ? String(dados.wid) : undefined;
-    if (wid && vinculo.transcritos?.includes(wid)) return;
+    // Tabela própria (`transcricoes`), não mais uma lista dentro do vínculo:
+    // o teto arbitrário de 50 áudios por chamado deixou de existir, e a
+    // pergunta "já transcrevi este?" virou uma busca por chave primária.
+    if (wid && this.vinculos.jaTranscrito(dados.ticketId, wid)) return;
 
     await this.emEnvios(textoDaTranscricao(texto), null, parte => api.comentarChamado(vinculo.chamadoId, parte));
 
-    if (wid) {
-      vinculo.transcritos = [...(vinculo.transcritos || []), wid].slice(-MAXIMO_TRANSCRITOS);
-      await this.gravarVinculo(dados.ticketId, vinculo);
-    }
+    if (wid) this.vinculos.marcarTranscrito(dados.ticketId, wid);
     console.log(`${LOG} transcrição de áudio registrada no chamado ${vinculo.protocolo || vinculo.chamadoId} (ticket ${dados.ticketId})`);
   }
 

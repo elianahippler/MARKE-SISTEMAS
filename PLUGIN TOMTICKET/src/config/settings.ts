@@ -66,14 +66,6 @@ export interface ConfiguracaoTomTicket {
    */
   campoProtocoloId?: string;
   /**
-   * Webhook do n8n que grava o vínculo na tabela `comunica`.
-   *
-   * O plugin é quem age no TomTicket; o banco existe para que o que está fora
-   * dele — fluxos do n8n, relatórios — consiga ligar ticket a chamado. Vazio
-   * desliga a gravação, e o plugin segue funcionando pelo PluginStorage.
-   */
-  webhookVinculo?: string;
-  /**
    * Plugin de IA que gera o resumo no "Finalizar Chamado" e na transferência (id dele no
    * Markedesk, ex.: "ai-tools").
    *

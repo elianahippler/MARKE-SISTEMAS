@@ -23,7 +23,7 @@ export const metadata = definePlugin({
   // o logo de verdade aparece no botão "Finalizar Chamado".
   color: "#F76045",
   icon: "Chat",
-  version: "0.1.11",
+  version: "0.2.0",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 
@@ -86,15 +86,6 @@ export const metadata = definePlugin({
         tab: "conexao",
         helpText:
           "Campo personalizado do chamado que recebe o id do ticket. Só é gravado nas categorias onde o campo existe."
-      },
-      {
-        name: "webhookVinculo",
-        label: "Webhook do n8n (grava o vínculo no banco)",
-        type: "text",
-        tab: "conexao",
-        placeholder: "https://editor.n8n.markesistemas.com.br/webhook/plugin-tomticket-vinculo",
-        helpText:
-          "A cada chamado aberto, grava ticket + chamado na tabela comunica. Deixar vazio desliga a gravação — o plugin continua funcionando."
       },
       {
         type: "alert",

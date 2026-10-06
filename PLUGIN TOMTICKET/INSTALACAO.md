@@ -134,6 +134,18 @@ Hub — ligando essa opção o Portainer tenta baixar e falha.
 configuração do plugin quando o container é recriado. Sem eles, o token e os
 mapeamentos se perdem a cada atualização.
 
+**A partir da 0.2.0 isso vale para mais coisa.** O banco do plugin
+(`tomticket.db`, SQLite) fica nessa mesma pasta, e é nele que vivem os
+vínculos ticket↔chamado. Sem o volume, cada atualização do container perde os
+vínculos dos atendimentos EM CURSO — e a próxima mensagem de cada um abre um
+**segundo** chamado no TomTicket, deixando o cliente com dois protocolos para o
+mesmo assunto.
+
+Para conferir depois do deploy: Plugins → TomTicket → Configurar → aba
+**Diagnóstico**. O rodapé mostra quantos vínculos o banco tem. Se estiver em
+zero logo depois de atualizar uma instalação que já atendia, o volume não subiu
+montado.
+
 ---
 
 ## Etapa 3 — Registrar o plugin no Markedesk
@@ -170,19 +182,12 @@ acessível. Voltar à Etapa 2 e conferir se ele está **running**.
 **Testar conexão**. A mensagem deve dizer **Conexão OK** com a quantidade de
 atendentes encontrados.
 
-**3°** Ainda na aba **Conexão**, no campo **Webhook do n8n (grava o vínculo no
-banco)**, colar:
-
-```
-https://editor.n8n.markesistemas.com.br/webhook/comunica/grava
-```
-
-**Observação:** esse campo é opcional. Sem ele, o plugin continua abrindo e
-acompanhando os chamados normalmente — só não grava o vínculo na tabela
-`comunica` do banco, que é o que outros fluxos do n8n usam para achar o chamado
-a partir do ticket.
-
 Salvar.
+
+**Mudou na 0.3.0:** o campo **Webhook do n8n** não existe mais. O plugin guarda
+o vínculo ticket↔chamado no banco próprio, e quem precisa dele de fora consulta
+`GET /vinculos` em vez da tabela `comunica`. Quem está atualizando de uma versão
+anterior não precisa fazer nada: o valor antigo fica salvo e é ignorado.
 
 **Atenção:** salvar antes de ir para as outras abas. As listas de atendentes,
 setores e categorias são buscadas com o token — sem ele salvo, os campos das
