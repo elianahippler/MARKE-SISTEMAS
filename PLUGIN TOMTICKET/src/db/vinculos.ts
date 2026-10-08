@@ -247,4 +247,31 @@ export class RepositorioVinculos {
     preparado(this.banco, "INSERT OR IGNORE INTO transcricoes (ticket_id, wid, quando) VALUES (?, ?, ?)")
       .run(String(ticketId), wid, new Date().toISOString());
   }
+
+  /**
+   * Apaga os vínculos finalizados há mais de `idadeMinimaMs`.
+   *
+   * NÃO roda na hora da finalização, de propósito. O atendimento finalizado
+   * ainda recebe a despedida automática, o pedido de avaliação e a nota do
+   * cliente — tudo chegando com `ticket.status === "closed"` — e é o próprio
+   * vínculo (`finalizado: true`) que o fluxo usa para reconhecer esse
+   * atendimento e IGNORAR essas mensagens (ver `mensagem()` em
+   * `fluxo/chamados.ts`). Apagar o vínculo antes delas chegarem faria o
+   * fluxo ler "nunca virou chamado" e abrir um chamado NOVO e órfão para
+   * cada despedida — o mesmo tipo de duplicata que o vínculo existe para
+   * evitar. `idadeMinimaMs` é a folga para essas mensagens chegarem antes da
+   * exclusão.
+   *
+   * `transcricoes` some junto, por `ON DELETE CASCADE` (ver `banco.ts`).
+   * `eventos` (o log do Diagnóstico) não é vínculo a ticket específico e não
+   * é tocado aqui.
+   */
+  apagarFinalizadosAntigos(idadeMinimaMs: number): number {
+    const corte = new Date(Date.now() - idadeMinimaMs).toISOString();
+    const r = preparado(
+      this.banco,
+      "DELETE FROM vinculos WHERE finalizado = 1 AND atualizado_em < ?"
+    ).run(corte);
+    return Number(r.changes);
+  }
 }

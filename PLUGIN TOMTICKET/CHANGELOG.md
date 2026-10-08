@@ -11,6 +11,27 @@ As versões publicadas estão em
 
 ---
 
+## 0.5.0 — o banco não guarda atendimento encerrado para sempre (08/10/2026)
+
+O vínculo de um atendimento finalizado agora é apagado do banco, levando junto
+as transcrições dele (`ON DELETE CASCADE`). O log do Diagnóstico (`eventos`)
+não é tocado: ele não é vínculo de ticket.
+
+**Mas não na hora da finalização** — e esse é o ponto da versão. Logo depois de
+finalizar ainda chegam, com o ticket já fechado, a despedida automática, o
+pedido de avaliação e a nota do cliente. É justamente o vínculo com
+`finalizado: true` que o fluxo usa para RECONHECER essas mensagens e
+ignorá-las. Apagar na hora faria cada uma delas ler "este ticket nunca virou
+chamado" e abrir um chamado NOVO e órfão no TomTicket — a mesma classe de
+duplicata que o vínculo existe para evitar.
+
+Por isso a exclusão espera **24h após a finalização**, varrida a cada 30 min
+(e uma vez no boot, porque nada varre isso enquanto o plugin está parado).
+
+6 testes novos (101 no total), conferidos por mutação: tirando a trava de
+`finalizado = 1` o teste de vínculo aberto falha; tirando a espera da idade,
+falha o da despedida.
+
 ## 0.4.1 — correção da 0.4.0: confirmar sem depender do evento (06/10/2026)
 
 **A 0.4.0 quebrou em produção.** As respostas chegavam no WhatsApp e NÃO

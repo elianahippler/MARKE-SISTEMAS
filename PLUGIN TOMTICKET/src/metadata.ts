@@ -23,7 +23,7 @@ export const metadata = definePlugin({
   // o logo de verdade aparece no botão "Finalizar Chamado".
   color: "#F76045",
   icon: "Chat",
-  version: "0.4.1",
+  version: "0.5.0",
   minSdkVersion: "1.28.0",
   description: "Integração com o TomTicket — chamados de suporte dentro do atendimento.",
 

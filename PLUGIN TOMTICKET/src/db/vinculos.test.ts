@@ -203,3 +203,63 @@ describe("transcrições", () => {
     expect(repo.jaTranscrito(202, "wid-1")).toBe(false);
   });
 });
+
+describe("apagarFinalizadosAntigos", () => {
+  // Reescreve atualizado_em direto no banco: é o campo que a poda usa para
+  // decidir "há quanto tempo foi finalizado", e gravar() sempre grava "agora".
+  const envelhecer = (ticketId: number, ms: number) =>
+    banco
+      .prepare("UPDATE vinculos SET atualizado_em = ? WHERE ticket_id = ?")
+      .run(new Date(Date.now() - ms).toISOString(), String(ticketId));
+
+  it("não toca em vínculo aberto, não importa a idade", () => {
+    // O risco que esta função existe para evitar é apagar vínculo em uso. Um
+    // aberto nunca deve sumir, nem muito velho.
+    repo.gravar(101, VINCULO);
+    envelhecer(101, 999 * 86_400_000);
+    repo.apagarFinalizadosAntigos(1000);
+    expect(repo.ler(101)).not.toBeNull();
+  });
+
+  it("não apaga finalizado recente — é a folga para a despedida chegar", () => {
+    // Apagar cedo demais faz a despedida (que chega com o ticket já fechado)
+    // encontrar "nunca virou chamado" e abrir um chamado novo e órfão.
+    repo.gravar(101, { ...VINCULO, finalizado: true });
+    repo.apagarFinalizadosAntigos(24 * 60 * 60 * 1000);
+    expect(repo.ler(101)).not.toBeNull();
+  });
+
+  it("apaga finalizado que passou da idade mínima", () => {
+    repo.gravar(101, { ...VINCULO, finalizado: true });
+    envelhecer(101, 25 * 60 * 60 * 1000);
+    const apagados = repo.apagarFinalizadosAntigos(24 * 60 * 60 * 1000);
+    expect(apagados).toBe(1);
+    expect(repo.ler(101)).toBeNull();
+  });
+
+  it("leva as transcrições junto — mesmo cascade do ON DELETE", () => {
+    repo.gravar(101, { ...VINCULO, finalizado: true });
+    repo.marcarTranscrito(101, "wid-1");
+    envelhecer(101, 25 * 60 * 60 * 1000);
+    repo.apagarFinalizadosAntigos(24 * 60 * 60 * 1000);
+    expect(repo.jaTranscrito(101, "wid-1")).toBe(false);
+  });
+
+  it("mexe só no que passou da idade — o resto fica", () => {
+    repo.gravar(101, { ...VINCULO, finalizado: true }); // finalizado, recente — fica
+    repo.gravar(202, VINCULO); // aberto — fica
+    repo.gravar(303, { ...VINCULO, finalizado: true });
+    envelhecer(303, 25 * 60 * 60 * 1000); // finalizado, velho — some
+
+    const apagados = repo.apagarFinalizadosAntigos(24 * 60 * 60 * 1000);
+
+    expect(apagados).toBe(1);
+    expect(repo.ler(101)).not.toBeNull();
+    expect(repo.ler(202)).not.toBeNull();
+    expect(repo.ler(303)).toBeNull();
+  });
+
+  it("nada para apagar não lança e devolve zero", () => {
+    expect(repo.apagarFinalizadosAntigos(24 * 60 * 60 * 1000)).toBe(0);
+  });
+});

@@ -16,6 +16,30 @@ import { RepositorioPendentes } from "@/db/pendentes";
  * O preço é o chamado ficar alguns segundos atrás da conversa.
  */
 const INTERVALO_DA_VARREDURA_MS = 10_000;
+
+/**
+ * Quanto tempo um vínculo FINALIZADO fica no banco antes de ser apagado.
+ *
+ * Não é zero, nem minutos: logo após finalizar ainda chegam, com o ticket já
+ * fechado, a despedida automática, o pedido de avaliação e a nota do cliente
+ * — e é o vínculo (`finalizado: true`) que o fluxo usa para RECONHECER essas
+ * mensagens e ignorá-las. Apagar cedo demais faz o fluxo ler "nunca virou
+ * chamado" nessas mensagens e abrir um chamado novo e órfão para cada uma.
+ * 24h é folga ampla para esse fim de conversa chegar, sem guardar o
+ * atendimento por muito tempo depois de encerrado. Ver
+ * `RepositorioVinculos.apagarFinalizadosAntigos`.
+ */
+const RETENCAO_POS_FINALIZACAO_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * De quanto em quanto tempo rodar a limpeza dos finalizados antigos.
+ *
+ * Bem mais espaçada que a varredura de ack: isto não é trabalho que confirma
+ * nada em andamento, só libera espaço. 30 min é frequente o bastante para o
+ * banco não acumular dias de atendimentos encerrados.
+ */
+const INTERVALO_DA_LIMPEZA_MS = 30 * 60 * 1000;
+
 import { RepositorioVinculos } from "@/db/vinculos";
 import { importarDoStorage } from "@/db/importar";
 import {
@@ -67,6 +91,7 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
   let vinculos: RepositorioVinculos | null = null;
   let pendentes: RepositorioPendentes | null = null;
   let varredura: NodeJS.Timeout | null = null;
+  let limpeza: NodeJS.Timeout | null = null;
 
   const server: PluginServer = new PluginServer({
     metadata,
@@ -413,6 +438,24 @@ export function createTomTicketInstance(opts: CreateInstanceOptions = {}): TomTi
       });
     }, INTERVALO_DA_VARREDURA_MS);
     varredura.unref?.();
+
+    /**
+     * Apaga os vínculos finalizados que passaram da retenção (ver
+     * RETENCAO_POS_FINALIZACAO_MS). Também no boot: o plugin pode ter ficado
+     * fora do ar por mais tempo que o intervalo normal, e nada mais varre
+     * isso enquanto ele está parado.
+     */
+    const limparFinalizados = () => {
+      try {
+        const apagados = vinculos?.apagarFinalizadosAntigos(RETENCAO_POS_FINALIZACAO_MS) ?? 0;
+        if (apagados > 0) console.log(`${LOG} ${apagados} vínculo(s) finalizado(s) há mais de 24h removido(s) do banco`);
+      } catch (err: any) {
+        console.error(`${LOG} falha ao limpar os vínculos finalizados: ${err?.message || err}`);
+      }
+    };
+    limparFinalizados();
+    limpeza = setInterval(limparFinalizados, INTERVALO_DA_LIMPEZA_MS);
+    limpeza.unref?.();
 
     /**
      * A importação é best-effort: se o backend estiver fora, o marco não é
